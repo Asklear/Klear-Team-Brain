@@ -1,5 +1,9 @@
 # Klear-Team-Brain
 
+[![CI](https://github.com/Asklear/Klear-Team-Brain/actions/workflows/ci.yml/badge.svg)](https://github.com/Asklear/Klear-Team-Brain/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
+
 > **全队 AI 编程的共享记忆。**
 >
 > 大家照常用 Claude Code / Codex 干活，session 自动汇进一个共享的 **git 真相库**，并与 GitHub 代码现状、团队文档融为一体。任何人都能在编辑器里通过 MCP 问一句「X 做到哪了 / 当初怎么定的 / 谁在搞 Y」，拿到综合全队 **session + 代码 + 文档** 的答复。自托管、带隐私闸门、对干活的人零额外负担。

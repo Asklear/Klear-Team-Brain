@@ -1,5 +1,9 @@
 # Klear-Team-Brain
 
+[![CI](https://github.com/Asklear/Klear-Team-Brain/actions/workflows/ci.yml/badge.svg)](https://github.com/Asklear/Klear-Team-Brain/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](https://nodejs.org)
+
 > **Your team's collective memory for AI-assisted coding.**
 >
 > Everyone keeps using Claude Code / Codex as usual; their sessions automatically flow into one shared **git truth store** — fused with live GitHub code state and your team's docs. Then anyone can ask, straight from their editor over MCP, *"where did X land, how was it decided, who's working on Y"* and get an answer synthesized across the team's **sessions, code, and docs**. Self-hosted, privacy-gated, zero extra effort for the people doing the work.
