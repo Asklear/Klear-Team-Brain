@@ -1,0 +1,12 @@
+# gitleaks 配置：用默认规则集 + 放行「按设计就带占位密钥」的样例文件。
+# CI 的 secret-scan 用 gitleaks CLI 跑 `gitleaks detect --no-git --source .`，
+# 会自动加载本文件。真正的机密文件（*.yaml 非 example）都已 gitignore，不在仓里。
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "样例配置里的占位/示例密钥（ghp_xxx、app_secret: xxxx 等），按设计提交，不算泄露"
+paths = [
+  '''.*\.example\.yaml$''',
+]
