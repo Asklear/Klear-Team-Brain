@@ -1,0 +1,26 @@
+# 客户端配置（每台机器一份，用户自己管）。复制成 client.config.yaml 再改。
+# client.config.yaml 不要提交（含 token）——已在 .gitignore。
+server_url: https://your-server.example.com
+token: "向-CEO-索取你的-token"     # 你的个人 token（CEO 在服务器 tokens.yaml 里生成后私下发你）
+me:
+  id: 你的id                       # 要和 team.yaml 里你的 id 一致
+  name: 你的名字
+
+# 允许上传的工作空间（session 的 cwd 在这些文件夹下才传；其余留本机）
+upload_folders:
+  - /Users/you/Documents/Code/your-team-stuff
+  # - ~/Documents/Code/your-team-stuff  # 也支持前导 ~
+exclude:
+  - /Users/you/Documents/Code/your-team-stuff/secret
+
+codex: true         # 是否也采集 ~/.codex/sessions（用 Codex 干活的；不用 Codex 设 false 无所谓）
+interval_sec: 60    # 多久扫一次
+debounce_sec: 60    # session 空闲多少秒才算"稳定"、才上传
+# 注：M3 起只采集 session。文档迁飞书（不再有 docs/agentdocs/vault 配置）；
+#     space 身份由服务器按 registry 定（github__owner__repo 命中登记的 / 否则 local__<id> + folder 标签）。
+
+# 管理员块：只有 CEO 这台机器需要（能 SSH 进服务器 = admin）。普通成员删掉这段。
+# 配了它才能用 brain admin add/who/rm（经 SSH 在服务器上加人/列人/撤人）。
+# admin:
+#   ssh: root@<服务器IP或域名>
+#   dir: /opt/team-brain          # 服务器上代码所在目录

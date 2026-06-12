@@ -1,0 +1,83 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { initTruth } from "../server/gitstore.mjs";
+import { ingest } from "../server/ingest.mjs";
+
+const REG = { github: { orgs: [{ org: "coldestlin" }], repos: [] } };
+const SUBMITTER = { id: "hank", name: "hankyuan" };
+// 最小可解析的 Claude Code session：第一句人类开场 = intent
+const RAW = JSON.stringify({ type: "user", message: { role: "user", content: "帮我加个功能" } }) + "\n" +
+            JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "好的，做完了" }] } }) + "\n";
+
+function freshTruth() {
+  const dir = mkdtempSync(join(tmpdir(), "tb-ingest-"));
+  initTruth(dir);
+  return dir;
+}
+const cardOf = (truth, spaceKey) => {
+  const sd = join(truth, "spaces", spaceKey, "sessions");
+  const branch = readdirSync(sd)[0];
+  const md = readdirSync(join(sd, branch)).find((f) => f.endsWith(".md"));
+  return readFileSync(join(sd, branch, md), "utf8");
+};
+
+test("ingest: 已登记 github remote → 落 github space + space.yaml 新 schema", async () => {
+  const truth = freshTruth();
+  const r = await ingest(truth, {
+    id: "s1", raw: RAW, tool: "claude-code", branch: "main",
+    remote: { host: "github.com", owner: "coldestlin", repo: "bossa" },
+    folder: "ignored-for-github", producer: SUBMITTER,
+  }, SUBMITTER, REG);
+  assert.equal(r.space_key, "github__coldestlin__bossa");
+  const yaml = readFileSync(join(truth, "spaces", "github__coldestlin__bossa", "space.yaml"), "utf8");
+  assert.match(yaml, /type: github/);
+  assert.match(yaml, /ref: github\/coldestlin\/bossa/);
+  assert.match(yaml, /via: org/);
+  const card = cardOf(truth, "github__coldestlin__bossa");
+  assert.match(card, /space_key: github__coldestlin__bossa/);
+  assert.doesNotMatch(card, /^folder:/m);   // github session 不带 folder
+  assert.match(card, /\*\*用户\*\*：帮我加个功能/);   // 正文 = 全文 transcript
+  assert.match(card, /\*\*助手\*\*：好的，做完了/);
+});
+
+test("ingest: 未登记 remote → 落 local__<person> + folder 标签", async () => {
+  const truth = freshTruth();
+  const r = await ingest(truth, {
+    id: "s2", raw: RAW, tool: "claude-code", branch: "main",
+    remote: { host: "github.com", owner: "random", repo: "x" },
+    folder: "bossa-test/cao", producer: SUBMITTER,
+  }, SUBMITTER, REG);
+  assert.equal(r.space_key, "local__hank");
+  const card = cardOf(truth, "local__hank");
+  assert.match(card, /^folder: bossa-test\/cao$/m);
+  const yaml = readFileSync(join(truth, "spaces", "local__hank", "space.yaml"), "utf8");
+  assert.match(yaml, /type: local/);
+  assert.match(yaml, /person: hank/);
+});
+
+test("ingest: 无 remote（纯本地）→ local__<person>", async () => {
+  const truth = freshTruth();
+  const r = await ingest(truth, {
+    id: "s3", raw: RAW, tool: "claude-code", branch: "no-branch",
+    remote: null, folder: "scratch/notes", producer: SUBMITTER,
+  }, SUBMITTER, REG);
+  assert.equal(r.space_key, "local__hank");
+  assert.match(cardOf(truth, "local__hank"), /^folder: scratch\/notes$/m);
+});
+
+test("ingest: 同 session 换分支 → 删旧坐标副本（孤儿清理，不留双份）", async () => {
+  const truth = freshTruth();
+  const common = {
+    id: "smv", raw: RAW, tool: "claude-code",
+    remote: { host: "github.com", owner: "coldestlin", repo: "bossa" }, producer: SUBMITTER,
+  };
+  await ingest(truth, { ...common, branch: "feat/a" }, SUBMITTER, REG);
+  const r2 = await ingest(truth, { ...common, branch: "feat/b" }, SUBMITTER, REG);
+  assert.equal(r2.pruned, 2);   // 旧分支的 .jsonl + .md 被删
+  const sd = join(truth, "spaces", "github__coldestlin__bossa", "sessions");
+  assert.equal(readdirSync(join(sd, "feat-a")).length, 0);   // 旧坐标已清空（无双份）
+  assert.deepEqual(readdirSync(join(sd, "feat-b")).sort(), ["hank-smv.jsonl", "hank-smv.md"]);
+});

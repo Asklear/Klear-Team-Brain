@@ -1,0 +1,44 @@
+{
+  "name": "klear-team-brain",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Self-hosted team memory for AI coding agents — fuses Claude Code/Codex sessions, GitHub code state, and team docs into one git truth store, queryable from your editor over MCP.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/Asklear/Klear-Team-Brain#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Asklear/Klear-Team-Brain.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Asklear/Klear-Team-Brain/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "codex",
+    "ai-agents",
+    "team-memory",
+    "knowledge-base",
+    "self-hosted",
+    "developer-tools"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "brain": "cli/brain.mjs"
+  },
+  "scripts": {
+    "mcp": "node mcp/server.mjs",
+    "server": "node server/server.mjs",
+    "sync": "node client/sync.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.66.1",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "yaml": "^2.9.0",
+    "zod": "^3.23.8"
+  }
+}

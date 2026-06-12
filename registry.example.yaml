@@ -1,0 +1,21 @@
+# registry —— 登记的 GitHub org / repo + 各自的 PAT，决定"有哪些 github space"（REDESIGN §3.4）。
+# 复制成 registry.yaml 填真实值。registry.yaml 含 PAT → 已 gitignore，别提交（住服务器，跟 tokens.yaml 一样）。
+# 服务器启动加载、改完 systemctl restart 生效。可用 `brain admin org/repo add ... --pat <PAT>` 维护。
+#
+# PAT 粒度对齐登记粒度：
+#   · org 一把  —— 这把覆盖该 org 下全部 repo
+#   · repo 每仓一把
+#   · 条目不写 pat → 回退到全局 GITHUB_TOKEN（公开仓匿名也能读，只是有限流）
+# 没登记的 remote（哪怕挂着 GitHub）一律落 local__<person> + folder 标签。
+github:
+  orgs:
+    - { org: your-org, pat: "ghp_orgPATxxxxxxxx" }          # 一把覆盖 your-org 全部 repo
+  repos:
+    - { owner: someone, repo: their-repo, pat: "ghp_repoPATyyyy" }   # 单仓一把
+    - { owner: public-user, repo: public-repo }             # 公开仓可不填 pat（走全局/匿名）
+
+# 仓转移映射（owner/repo 旧→新）。迁移 + live ingest 都用：
+#   · 迁移：把旧 github 空间「改名/并入」到现位置，而不是降级。
+#   · ingest：客户端本地 remote 还指旧地址时，也按它落到现位置（不必每人改 remote）。
+# moved:
+#   - { from: olduser/oldname, to: neworg/newname }

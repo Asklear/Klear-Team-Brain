@@ -1,0 +1,7 @@
+# 复制成 feishu.yaml（服务器级、已 gitignore——含 App Secret，跟 tokens.yaml/registry.yaml 一族，别提交）。
+# 自建应用怎么建、scope 开哪些、怎么把应用加进知识库：见 FEISHU_RESEARCH.md §9（含实测踩坑）。
+# 启动加载、改完 systemctl restart team-brain 生效。
+app_id: cli_xxxxxxxxxxxxxxxx
+app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# poll_hours: 4                       # 多久对账一次（增量靠 obj_edit_time，没变的不重拉，便宜）
+# wiki_base: https://xxx.feishu.cn    # 租户域名（可选）；配了文档卡 frontmatter 会带可点的 url
