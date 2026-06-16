@@ -68,6 +68,34 @@ test("ingest: 无 remote（纯本地）→ local__<person>", async () => {
   assert.match(cardOf(truth, "local__hank"), /^folder: scratch\/notes$/m);
 });
 
+test("ingest: session-history-md → 保留 md 正文派生卡片", async () => {
+  const truth = freshTruth();
+  const raw = [
+    JSON.stringify({
+      type: "session_history_meta",
+      timestamp: "2026-06-13T10:00:00.000Z",
+      updated: "2026-06-13T10:02:00.000Z",
+      cwd: "/work/repo",
+      branch: "main",
+      filename: "daily.md",
+    }),
+    JSON.stringify({
+      type: "session_history_markdown",
+      timestamp: "2026-06-13T10:02:00.000Z",
+      content: "# Daily\n\n- 完成 md session_history 采集\n- 继续验证上传",
+    }),
+  ].join("\n");
+  const r = await ingest(truth, {
+    id: "md1", raw, tool: "session-history-md", branch: "main",
+    remote: null, folder: "repo/session_history", producer: SUBMITTER,
+  }, SUBMITTER, REG);
+  assert.equal(r.space_key, "local__hank");
+  const card = cardOf(truth, "local__hank");
+  assert.match(card, /tool: session-history-md/);
+  assert.match(card, /# Daily/);
+  assert.match(card, /完成 md session_history 采集/);
+});
+
 test("ingest: 同 session 换分支 → 删旧坐标副本（孤儿清理，不留双份）", async () => {
   const truth = freshTruth();
   const common = {

@@ -26,6 +26,7 @@ export function parseSession(file) {
 
 // 直接吃 jsonl 文本（服务器收到上传的 raw 就用这个）；按 tool 分派，未给则自动嗅探。
 export function parseSessionText(content, tool) {
+  if (tool === "session-history-md") return parseSessionHistoryMdText(content);
   if ((tool || detectTool(content)) === "codex") return parseCodexText(content);
   return parseClaudeText(content);
 }
@@ -104,4 +105,27 @@ function parseCodexText(content) {
   const tail = agentTail.length ? agentTail : riTail;
   const conclusion = tail.slice(-2).join(" ").replace(/\s+/g, " ").trim().slice(0, 1500);
   return { intent, branch, repoUrl, cwd, ts, updated: updated || ts, turns: turns || riTail.length, conclusion, subagent };
+}
+
+function parseSessionHistoryMdText(content) {
+  let meta = {}, body = content;
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.type === "session_history_meta") meta = o;
+    if (o.type === "session_history_markdown") body = o.content || o.markdown || textOf(o);
+  }
+  const lines = String(body || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const heading = lines.find((s) => /^#{1,6}\s+\S/.test(s));
+  const first = heading ? heading.replace(/^#{1,6}\s+/, "") : lines[0];
+  const last = lines.slice(-12).join(" ");
+  return {
+    intent: first ? first.replace(/\s+/g, " ").slice(0, 120) : null,
+    branch: meta.branch || null,
+    cwd: meta.cwd || null,
+    ts: meta.timestamp || null,
+    updated: meta.updated || meta.timestamp || null,
+    turns: lines.length ? 1 : 0,
+    conclusion: last.replace(/\s+/g, " ").trim().slice(0, 1500),
+  };
 }

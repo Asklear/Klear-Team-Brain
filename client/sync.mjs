@@ -26,6 +26,7 @@ cfg.upload_folders = (cfg.upload_folders || []).map(expandHome);
 cfg.exclude = (cfg.exclude || []).map(expandHome);
 const CC_ROOT = join(homedir(), ".claude", "projects");
 const CODEX_ROOT = join(homedir(), ".codex", "sessions");
+const SESSION_HISTORY_DIR = "session_history";
 const DEBOUNCE = (cfg.debounce_sec ?? 60) * 1000;
 const CONC = Math.max(1, cfg.concurrency ?? 4);          // 上传并发：一个卡住的不再串行阻塞整轮
 const STATE = join(ROOT, ".brain-state.json");           // 已上传记录持久化：重启不再重传历史
@@ -190,11 +191,99 @@ async function syncCodexSessions() {
   return { up, skip };
 }
 
+function sessionHistoryProjectDir(file) {
+  const parts = file.split("/");
+  const idx = parts.lastIndexOf(SESSION_HISTORY_DIR);
+  if (idx <= 0) return dirname(file);
+  return parts.slice(0, idx).join("/") || "/";
+}
+
+function* sessionHistoryMdFiles(dir, inside = false) {
+  if (!dir || excluded(dir)) return;
+  let es; try { es = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of es) {
+    const p = join(dir, e.name);
+    if (excluded(p)) continue;
+    if (e.isDirectory()) {
+      yield* sessionHistoryMdFiles(p, inside || e.name === SESSION_HISTORY_DIR);
+    } else if (inside && e.name.endsWith(".md")) {
+      yield p;
+    }
+  }
+}
+
+function* sessionHistoryFiles() {
+  for (const root of cfg.upload_folders || []) {
+    if (gated(root)) yield* sessionHistoryMdFiles(root);
+  }
+}
+
+function sessionHistoryId(file) {
+  const name = basename(file, ".md").replace(/[/\\\0]+/g, "-").slice(0, 80) || "session";
+  const hash = createHash("sha1").update(file).digest("hex").slice(0, 12);
+  return `session-history-${hash}-${name}`;
+}
+
+function sessionHistoryRaw({ file, cwd, branch, content, mtimeMs }) {
+  const updated = new Date(mtimeMs).toISOString();
+  return [
+    JSON.stringify({
+      type: "session_history_meta",
+      timestamp: updated,
+      updated,
+      cwd,
+      branch,
+      source_file: file,
+      filename: basename(file),
+    }),
+    JSON.stringify({
+      type: "session_history_markdown",
+      timestamp: updated,
+      content,
+    }),
+  ].join("\n") + "\n";
+}
+
+async function syncSessionHistoryMd() {
+  if (cfg.session_history_md === false) return { up: 0, skip: 0 }; // 默认开；显式 false 才关
+  let up = 0, skip = 0;
+  const jobs = [];
+  for (const file of sessionHistoryFiles()) {
+    let st; try { st = statSync(file); } catch { continue; }
+    const m = st.mtimeMs;
+    if (Date.now() - m < DEBOUNCE) continue;
+    if (seenSession.get(file) === m) continue;
+    if (st.size > MAX_RAW) { log.warn("session-history 跳过：原文超读前上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; continue; }
+    const cwd = sessionHistoryProjectDir(file);
+    if (!gated(cwd) || !gated(file)) { skip++; seenSession.set(file, m); continue; }
+    let content; try { content = readFileSync(file, "utf8"); } catch (e) { log.warn("session-history 读取失败", { file: basename(file), err: e.message }); continue; }
+    if (!content.trim()) { skip++; seenSession.set(file, m); continue; }
+    jobs.push({ file, m, cwd, content });
+  }
+  await pool(jobs, CONC, async ({ file, m, cwd, content }) => {
+    const id = sessionHistoryId(file);
+    try {
+      const c = coordOf(cwd, cfg.upload_folders);
+      const branch = gitBranch(cwd);
+      const raw = sessionHistoryRaw({ file, cwd, branch, content, mtimeMs: m });
+      if (raw.length > MAX_UPLOAD) { log.warn("session-history 跳过：上传体超上限", { id, mb: +(raw.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; return; }
+      const r = await post("/ingest", {
+        id, tool: "session-history-md", raw,
+        remote: c.remote, folder: c.folder, branch,
+        producer: cfg.me,
+      });
+      if (r.status === 200) { up++; seenSession.set(file, m); } else log.warn("session-history 上传失败", { id, status: r.status, body: (r.body || "").slice(0, 200) });
+    } catch (e) { log.error("session-history 出错", { id, err: e.message }); }
+  });
+  return { up, skip };
+}
+
 async function tick() {
   const s = await syncSessions();
   const x = await syncCodexSessions();
+  const h = await syncSessionHistoryMd();
   saveState();                                          // 落盘已上传记录（重启复原）
-  log.info("tick", { cc_up: s.up, cc_skip: s.skip, codex_up: x.up, codex_skip: x.skip });
+  log.info("tick", { cc_up: s.up, cc_skip: s.skip, codex_up: x.up, codex_skip: x.skip, session_history_up: h.up, session_history_skip: h.skip });
 }
 
 // 防重叠：一轮没跑完（卡在慢上传）时下一次定时不叠进来重复传

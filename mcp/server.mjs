@@ -16,13 +16,34 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const cfg = parse(readFileSync(join(ROOT, "client.config.yaml"), "utf8"));
 const HDRS = { authorization: `Bearer ${cfg.token}`, "x-client-version": CLIENT_VERSION };
 
+// 跨境链路（电信国际出口→日本→阿里云海外）约 13% 的请求 TLS 握手丢包卡死。
+// 对策：每次尝试设超时（卡住的握手快速失败，别拖死整个 MCP 调用），网络错误自动重试带退避。
+// HTTP 状态错误（4xx/5xx 已到服务器）不重试——那是真错，重发也一样。
+// 健康握手<1s、最慢实测 3.1s → 6s 超时足够，又能让卡死的尝试尽快败掉进重试。
+// 3 次重试能救瞬时卡顿（绝大多数 fetch failed）；几十秒级的持续黑窗救不了——
+// 那时快速败掉（最坏 ~27s）远好过干等一分钟，根治要靠服务器侧加跨境加速（见下）。
+const ATTEMPT_TIMEOUT_MS = 6_000;
+const MAX_RETRIES = 3;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function api(path, params) {
   const u = new URL(cfg.server_url + path);
   for (const [k, v] of Object.entries(params || {})) if (v != null) u.searchParams.set(k, v);
-  const r = await fetch(u, { headers: HDRS });
-  if (!r.ok) throw new Error(`${path} → ${r.status} ${await r.text()}`);
-  return r.json();
+  let lastErr;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt) await sleep(Math.min(400 * 2 ** (attempt - 1), 2_000)); // 退避 400/800/1600ms
+    try {
+      const r = await fetch(u, { headers: HDRS, signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS) });
+      if (!r.ok) throw new HttpError(`${path} → ${r.status} ${await r.text()}`);
+      return await r.json();
+    } catch (e) {
+      if (e instanceof HttpError) throw e; // 服务器已响应的真错：不重试
+      lastErr = e; // 网络层（TLS 握手卡死 / 超时 / 连接重置）：可重试
+    }
+  }
+  throw new Error(`${path} → 网络不稳，重试 ${MAX_RETRIES} 次仍失败（跨境链路丢包）：${lastErr?.message || lastErr}`);
 }
+class HttpError extends Error {}
 
 const INSTRUCTIONS = `团队大脑（team-brain）：全队 Claude Code/Codex 的 session 汇成一个 git 真相库（每条 session 一份【脱敏全文对话】），再叠 GitHub 代码现状 + 飞书文档镜像。
 回答「X 做到哪了 / 当初怎么定的 / 谁在搞 Y / 最近有啥进展」这类跨人跨项目的问题时，先用这些工具查证，再据实答（带依据）。

@@ -3,8 +3,9 @@
 import { textOf, codexText, detectTool } from "./parse.mjs";
 
 export function transcript(content, cap = 20000, tool) {
-  const out = (tool || detectTool(content)) === "codex"
-    ? codexLines(content) : claudeLines(content);
+  const kind = tool || detectTool(content);
+  const out = kind === "session-history-md" ? sessionHistoryLines(content)
+    : kind === "codex" ? codexLines(content) : claudeLines(content);
   let s = out.join("\n\n");
   if (s.length > cap) s = s.slice(0, cap) + "\n\n…（已截断，全文更长）";
   return s || "（无可读对话）";
@@ -44,4 +45,16 @@ function codexLines(content) {
     }
   }
   return evt.length ? evt : raw;
+}
+
+function sessionHistoryLines(content) {
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.type === "session_history_markdown") {
+      const md = o.content || o.markdown || "";
+      return md ? [md] : [];
+    }
+  }
+  return content.trim() ? [content] : [];
 }

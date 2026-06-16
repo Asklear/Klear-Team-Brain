@@ -14,6 +14,7 @@ exclude:
   - /Users/you/Documents/Code/your-team-stuff/secret
 
 codex: true         # 是否也采集 ~/.codex/sessions（用 Codex 干活的；不用 Codex 设 false 无所谓）
+session_history_md: true  # 是否采集 upload_folders 内 session_history/**/*.md（默认开；设 false 关闭）
 interval_sec: 60    # 多久扫一次
 debounce_sec: 60    # session 空闲多少秒才算"稳定"、才上传
 # 注：M3 起只采集 session。文档迁飞书（不再有 docs/agentdocs/vault 配置）；
