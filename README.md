@@ -72,6 +72,23 @@ People doing the work **do nothing extra**; people who want to understand **ask 
    ```
 3. **Ask, from your editor.** Once MCP is wired up, ask in Claude Code / Codex: *"where did the auth refactor land?"*, *"who's working on billing?"*, *"how did we decide the schema?"*
 
+## Setting up the doc mirror (Lark / Feishu)
+
+Optional. If your team keeps human-written docs (goals, decisions, notes) in a Lark/Feishu **wiki**, the server can one-way **mirror** those doc bodies into the truth store, so the asking agent can `grep`/`read` them alongside sessions and code. Set it up once:
+
+1. **Create a custom app** in the Lark/Feishu developer console (an *enterprise custom app*); note its **App ID** + **App Secret** — the server exchanges these for a `tenant_access_token`.
+2. **Enable read scopes** under the app's *Permissions*, then publish a version and have an admin approve it: `docx:document.readonly`, `drive:drive.readonly`, `wiki:wiki.readonly`. (You don't need a search scope — tenant-token native search is unreliable, so the mirror is searched locally.)
+3. **Authorize the app on the whole wiki — the non-obvious step, and the one that actually gates access.** A tenant-token app can only see wikis it's been explicitly added to, and the console **won't let you add an app directly**. Instead:
+   1. Create a group / chat.
+   2. Add **this app's bot** to that group — it must be the bot of the *same* App ID (adding the wrong bot is the most common failure).
+   3. In the wiki, go to **Settings → Members → Roles & permissions → Admins → Add admin** and add **that group**.
+
+   The app then has read access to the *entire* wiki. Propagation takes ~1–2 minutes.
+4. **Drop the credentials on the server:** copy `feishu.example.yaml` → `feishu.yaml` (**secret → gitignored**), fill in `app_id` / `app_secret`, and restart the service. Leave `feishu.yaml` out entirely and the doc layer stays quietly off.
+5. **Verify:** after a poll cycle, the wiki's docs appear under `feishu/<wiki>__<space_id>/…` in the truth store, searchable via `grep`.
+
+> China Feishu (`open.feishu.cn`) and international Lark (`open.larksuite.com`) are isolated platforms — create the app on whichever one your team uses. Create a **new** wiki later? Repeat step 3 for it, or the brain won't see it.
+
 ## Asking (the MCP tools)
 
 The truth store is exposed to the asking agent as a **read-only folder** via a handful of Unix-style primitives, all tied together by truth-store-relative `path`:

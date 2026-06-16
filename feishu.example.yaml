@@ -1,5 +1,5 @@
 # 复制成 feishu.yaml（服务器级、已 gitignore——含 App Secret，跟 tokens.yaml/registry.yaml 一族，别提交）。
-# 自建应用怎么建、scope 开哪些、怎么把应用加进知识库：见 FEISHU_RESEARCH.md §9（含实测踩坑）。
+# 自建应用怎么建、scope 开哪些、怎么把应用加进知识库：见 docs/FEISHU_RESEARCH.md §9（含实测踩坑，含截图）。
 # 启动加载、改完 systemctl restart team-brain 生效。
 app_id: cli_xxxxxxxxxxxxxxxx
 app_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
