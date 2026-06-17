@@ -29,25 +29,36 @@ function claudeLines(content) {
   return out;
 }
 
-// Codex：优先用干净的事件级对话（event_msg）；若没有则回退原始消息（response_item）。
+// Codex：response_item/output_text 保留完整换行和 markdown 结构；
+// event_msg/agent_message 是事件流版本，Codex 自身在序列化时去掉了换行（压成单行）。
+// 所以当 response_item 的助手消息含换行时，优先用 raw（结构化）；否则回退 evt（事件流）。
 function codexLines(content) {
   const evt = [], raw = [];
+  let rawHasStructure = false;
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
     const p = o.payload;
+    // phase=commentary 是助手的过程旁白（"我先看一下X"），标成「助手·过程」便于前端默认折叠；
+    // final_answer / 无 phase → 普通「助手」。Claude Code 无 phase，不受影响。
+    const asstLabel = (ph) => (ph === "commentary" ? "助手·过程" : "助手");
     if (o.type === "event_msg") {
       if (p?.type === "user_message" && p.message && !p.message.startsWith("<"))
         evt.push(`**用户**：\n${tidy(p.message)}`);
       else if (p?.type === "agent_message" && p.message)
-        evt.push(`**助手**：\n${tidy(p.message)}`);
+        evt.push(`**${asstLabel(p.phase)}**：\n${tidy(p.message)}`);
     } else if (o.type === "response_item" && p?.type === "message") {
       const t = codexText(p);
       if (!t || (p.role === "user" && t.startsWith("<")) || p.role === "developer") continue;
-      if (p.role === "user" || p.role === "assistant")
-        raw.push(`**${p.role === "user" ? "用户" : "助手"}**：\n${tidy(t)}`);
+      if (p.role === "user") raw.push(`**用户**：\n${tidy(t)}`);
+      else if (p.role === "assistant") {
+        raw.push(`**${asstLabel(p.phase)}**：\n${tidy(t)}`);
+        if (t.includes("\n")) rawHasStructure = true;
+      }
     }
   }
+  // response_item 助手消息含换行 → 有完整 markdown，用 raw；否则回退 evt
+  if (rawHasStructure) return raw;
   return evt.length ? evt : raw;
 }
 

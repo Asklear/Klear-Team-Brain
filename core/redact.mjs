@@ -23,3 +23,14 @@ export const scrubHome = (s) => (s || "")
 
 // agent 文件离机前的脱敏：密钥/token + 家目录路径。客户端在上传前调用。
 export const redactAgent = (s) => scrubHome(redact(s));
+
+// 出库读取（/read）专用：文件若以 YAML frontmatter 开头，只对【正文】做 secret 脱敏，
+// frontmatter 仅过家目录擦除、不跑 secret 规则。
+// 原因：frontmatter 是服务端生成的结构化元数据，node_token / obj_token / file_token 等是飞书公开 id
+// （非密钥），但含 "token" 字样会被上面的 secret 规则误伤成 [REDACTED_SECRET]，连键名都被吃掉。
+// 正文（含 .jsonl 原文，无 frontmatter → 整体走 redactAgent）该挡的密钥照常挡。
+export const redactReadable = (s) => {
+  const str = String(s ?? "");
+  const m = str.match(/^(---\n[\s\S]*?\n---\n?)([\s\S]*)$/);
+  return m ? scrubHome(m[1]) + redactAgent(m[2]) : redactAgent(str);
+};

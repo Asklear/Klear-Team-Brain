@@ -122,9 +122,11 @@ function previewOf(text) {
   const body = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
   for (const raw of body.split("\n")) {
     // 跳过说话人标签行（**用户**： / **助手**：）——内容现在在它下一行；取第一句有意义的内容
-    let t = raw.replace(/^#+\s*/, "").replace(/^\*\*(用户|助手)\*\*[：:]\s*/, "").trim();
+    let t = raw.replace(/^#+\s*/, "").replace(/^\*\*(用户|助手)(·过程)?\*\*[：:]\s*/, "").trim();
     if (!t) continue;
-    t = t.replace(/^[->*\s]+/, "").replace(/[*`#]/g, "");  // 去列表/引用前缀和基础 md 记号，预览更干净
+    t = t.replace(/^\s*[-*+>]\s+/, "")             // 行首列表/引用符（符号+空格，不会误吃 **）
+         .replace(/`([^`]+)`/g, "$1")              // 行内代码：去反引号留内容
+         .replace(/\*\*?([^*]+)\*\*?/g, "$1");     // 粗/斜：去成对星号留内容（孤立的 * # 如 C#、a*b 不动）
     if (t.trim()) return t.replace(/\s+/g, " ").trim().slice(0, 160);
   }
   return "";
@@ -169,6 +171,28 @@ function sessionFields(mdPath, rel) {
     space_key: parts[1] || "", branch: parts[3] || "", file: parts[parts.length - 1],
     preview: previewOf(head),
   };
+}
+
+// 每个 space 的会话统计：一次遍历 spaces/ 读卡片头部（走 mtime 缓存，便宜），
+// 聚合 {sessions 会话数, last_active 最近活动, people 参与人数}。键 = 落盘 space_key（= 目录名）。
+// 给 /ls 顶层列 space 时附上，替代无意义的 children（永远是 code-state.md/sessions/space.yaml 三项）。
+export function spaceStatsTruth(TRUTH) {
+  const stats = {};
+  for (const mdPath of walkMd(join(TRUTH, "spaces"))) {
+    const rel = relative(TRUTH, mdPath);
+    if (!rel.includes("/sessions/")) continue;
+    const f = sessionFields(mdPath, rel);
+    if (!f) continue;
+    const k = f.space_key;
+    const s = stats[k] || (stats[k] = { sessions: 0, last_active: "", _p: new Set() });
+    s.sessions++;
+    const we = f.updated || f.date || "";
+    if (we > s.last_active) s.last_active = we;
+    const who = f.producer_id || f.author;
+    if (who) s._p.add(who);
+  }
+  for (const k of Object.keys(stats)) { stats[k].people = stats[k]._p.size; delete stats[k]._p; }
+  return stats;
 }
 
 export async function sessionsTruth(TRUTH, { author, space, since, until, limit = 50, withIngestDate = false, roster = { members: [] }, registry = {} } = {}) {

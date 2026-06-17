@@ -303,15 +303,71 @@ mark, .hit { background: var(--green-12); color: var(--green); font-weight: var(
 
 /* ---------- 阅读视图 ---------- */
 .meta-card {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--sp-5);
   background: var(--surface-side); border: var(--bw) solid var(--line);
-  border-radius: var(--r-lg); padding: var(--sp-6) var(--sp-7); margin-bottom: var(--sp-6);
+  border-radius: var(--r-lg); margin-bottom: var(--sp-6);
+}
+.meta-card > summary {
+  list-style: none; cursor: pointer; padding: var(--sp-5) var(--sp-7);
+  font-family: var(--font-mono); font-size: var(--fz-meta); color: var(--muted);
+  display: flex; align-items: center; gap: var(--sp-3);
+}
+.meta-card > summary::-webkit-details-marker { display: none; }
+.meta-card > summary::before { content: "▸"; color: var(--faint); font-size: .8em; }
+.meta-card[open] > summary::before { content: "▾"; }
+.meta-card > summary:hover { color: var(--ink); }
+.meta-card .meta-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--sp-5);
+  padding: 0 var(--sp-7) var(--sp-6);
 }
 .meta-card .mk { color: var(--faint); font-size: var(--fz-meta-sm); text-transform: uppercase; letter-spacing: var(--ls-tag); }
 .meta-card .mv { color: var(--ink); font-size: var(--fz-meta); margin-top: 2px; word-break: break-word; }
 .meta-card .mv a { color: var(--green); }
-.raw-toggle { background: none; border: none; padding: 0; font-family: var(--font-mono); color: var(--muted); font-size: var(--fz-meta); cursor: pointer; }
-.raw-toggle:hover { color: var(--green); }
+/* 大代码块折叠 */
+.doc .fold-code { margin: 0 0 1em; }
+.doc .fold-code > summary {
+  list-style: none; cursor: pointer; font-family: var(--font-mono); font-size: var(--fz-meta);
+  color: var(--muted); padding: var(--sp-3) var(--sp-4); background: var(--surface-sunk);
+  border: var(--bw) solid var(--line); border-radius: var(--r-md);
+  display: flex; align-items: center; gap: var(--sp-3);
+}
+.doc .fold-code > summary::-webkit-details-marker { display: none; }
+.doc .fold-code > summary::before { content: "▸ 代码"; color: var(--faint); }
+.doc .fold-code[open] > summary::before { content: "▾ 代码"; }
+.doc .fold-code[open] > summary { margin-bottom: var(--sp-3); }
+.doc .fold-code > summary:hover { color: var(--ink); }
+.doc .fold-code pre { margin: 0; }
+/* 过程旁白：默认隐藏，顶部开关切 #doc-body.show-aside 显示；显示时弱化样式 */
+#doc-body:not(.show-aside) .turn-aside { display: none; }
+.turn-aside { opacity: .62; }
+.turn-aside .turn-who { color: var(--faint); }
+/* 详情页操作条：右侧竖排 rail。正文列右留固定槽位（view-doc 的 padding-right），rail 用负 margin 落进槽位，
+   float+sticky → 滚动时常驻右上、且永不盖正文。每个按钮：图标 + 二字标签竖排，大一点。 */
+.view-doc { padding-right: 84px; }
+.doc-actions {
+  float: right; margin-right: -84px;            /* 落进上面留出的右槽 */
+  position: sticky; top: calc(var(--topbar-h) + var(--sp-5)); z-index: 30;
+  display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.act-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  width: 64px; height: 58px; padding: 0; border-radius: var(--r-md);
+  font-family: var(--font-mono); font-size: var(--fz-meta-sm); font-weight: var(--fw-medium);
+  cursor: pointer; text-decoration: none;
+  background: var(--surface); color: var(--muted); border: var(--bw) solid var(--line);
+  transition: color .12s, border-color .12s, background .12s;
+}
+.act-btn:hover { border-color: var(--line-soft); color: var(--ink); }
+.act-btn .act-ico { display: inline-flex; }
+.act-btn .act-ico svg { display: block; width: 18px; height: 18px; }
+.act-btn .act-label { line-height: 1; }
+.act-btn.act-primary { color: var(--green); }                       /* 投喂：图标常绿，主操作 */
+.act-btn.act-primary:hover { border-color: var(--green); }
+.act-btn.act-on, .act-btn.act-done { color: var(--green); border-color: var(--green); background: var(--green-05); }
+/* 窄屏：取消右槽与悬浮，rail 回退成顶部横排 */
+@media (max-width: 860px) {
+  .view-doc { padding-right: 0; }
+  .doc-actions { float: none; position: static; margin: 0 0 var(--sp-5); flex-direction: row; flex-wrap: wrap; }
+}
 .raw pre { background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-lg); padding: var(--sp-6); overflow-x: auto; }
 .raw code { font-size: var(--fz-meta); color: var(--ink-prose); white-space: pre-wrap; word-break: break-word; }
 
@@ -338,6 +394,9 @@ mark, .hit { background: var(--green-12); color: var(--green); font-weight: var(
 .doc pre code { background: none; padding: 0; font-size: var(--fz-meta); line-height: 1.6; }
 .doc ol { margin: 0 0 1em; padding-left: 1.5em; }
 .doc ul ul, .doc ul ol, .doc ol ul, .doc ol ol { margin: .2em 0 .2em; }
+.doc li.task-item { list-style: none; margin-left: -1em; }
+.doc li.task-item input[type="checkbox"] { margin-right: .45em; accent-color: var(--green); vertical-align: -.1em; cursor: default; }
+.doc del { text-decoration: line-through; opacity: .6; }
 /* 表格 */
 .doc table { border-collapse: collapse; width: 100%; margin: 0 0 1em; font-family: var(--font-mono); font-size: var(--fz-row); display: block; overflow-x: auto; }
 .doc th, .doc td { border: var(--bw) solid var(--line); padding: var(--sp-3) var(--sp-4); text-align: left; vertical-align: top; }

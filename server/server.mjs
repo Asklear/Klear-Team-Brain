@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { loadRoster, loadTokens, tokenIndex } from "../core/team.mjs";
 import { loadRegistry, patFor, hasGithub } from "../core/registry.mjs";
-import { redactAgent } from "../core/redact.mjs";
+import { redactReadable } from "../core/redact.mjs";
 import { log } from "../core/log.mjs";
 import { fm } from "../core/card.mjs";
 import { ownerRepoFromRef, fileContent } from "../core/github.mjs";
@@ -20,14 +20,29 @@ import { initTruth } from "./gitstore.mjs";
 import { ingest } from "./ingest.mjs";
 import { refreshAll, enumAndRegisterOrgRepos } from "./codestate.mjs";
 import { syncFeishuDocs } from "./feishudocs.mjs";
-import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, frontmatterOf } from "./query.mjs";
+import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, frontmatterOf, spaceStatsTruth } from "./query.mjs";
 import { canonicalizePath, canonicalSpaceKey } from "../core/identity.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TRUTH = process.env.TRUTH_DIR || join(ROOT, "truth-server");
 const WEB_DIR = join(ROOT, "web");                 // 真相层 Web GUI 静态资源（无密钥）
 const PORT = Number(process.env.PORT) || 8787;
+// 默认只绑本机回环：公网经 TLS 反代访问，别把 8787 明文直接暴露到外网。
+// 容器/反代在别的网段时用 HOST=0.0.0.0 显式放开（此时务必靠防火墙/安全组封住该端口）。
+const HOST = process.env.HOST || "127.0.0.1";
 const MAX_BODY = 64 * 1024 * 1024;
+// 安全响应头：挂在所有响应上。CSP 锁死外部加载面（脚本只许自身、无 inline）——给渲染不可信内容的 GUI 兜底。
+// style 仍放行 inline（GUI 大量用 style=""）；img 放行 data:（favicon 是内联 svg）。
+const SEC_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "no-referrer",
+  "content-security-policy": [
+    "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:", "font-src 'self'", "connect-src 'self'",
+    "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", "object-src 'none'",
+  ].join("; "),
+};
 // Web GUI 静态资源：只认这些扩展名（不会撞到无扩展名的 API 路由如 /grep /ls）
 const WEB_TYPES = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -174,6 +189,7 @@ const resolveSpace = (key) => {
 
 const server = http.createServer((req, res) => {
   const t0 = Date.now();
+  for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
   const u = new URL(req.url, "http://x");
   // 来源 IP：公网套了 HTTPS 反代 → 真实 IP 在 x-forwarded-for（取第一跳）；本地直连回退 socket。
   const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim()
@@ -277,12 +293,13 @@ async function handle(req, res, u) {
       return json(res, 200, { answer: extractAnswer(stdout) });
     } catch (e) {
       log.warn("ask failed", { who: m.id, ms: Date.now() - t0, err: String(e.message || e).slice(0, 200) });
-      return json(res, 502, { error: "问答失败：" + String(e.message || e).slice(0, 200) });
+      return json(res, 502, { error: "问答失败，请稍后再试（详情见服务器日志）" });
     } finally { askInflight--; }
   }
 
   // --- 读真相库任意文件（深挖；统一 path 坐标，grep/find/ls 命中的 path 直接拿来读）---
-  // 出口过 redactAgent：.md 派生已脱敏（幂等无害）；.jsonl 原文未脱敏 → 这里兜底，挡裸密钥/家目录离机。
+  // 出口过 redactReadable：.md 只脱敏正文、保留 frontmatter 公开 id（node_token 等不被误打码）；
+  // .jsonl 原文无 frontmatter → 整体脱敏兜底，挡裸密钥/家目录离机。
   if (req.method === "GET" && u.pathname === "/read") {
     if (!authMember(req)) return json(res, 401, { error: "invalid token" });
     // 坐标归一（兜底）：agent 可能抄了 log 给的旧/别名 space（haurhi…）→ 现位置找不到才映射，消除 404 类不一致
@@ -291,7 +308,7 @@ async function handle(req, res, u) {
     try { abs = safeRelPath(TRUTH, path, "path"); } catch { return json(res, 400, { error: "bad path" }); }
     if (!existsSync(abs)) return json(res, 404, { error: "not found" });
     if (statSync(abs).isDirectory()) return json(res, 400, { error: "是目录，请用 ls" });
-    let text = redactAgent(readFileSync(abs, "utf8"));
+    let text = redactReadable(readFileSync(abs, "utf8"));
     const offset = Math.max(0, Number(u.searchParams.get("offset")) || 0);
     const limit = Number(u.searchParams.get("limit")) || 0;
     if (offset || limit) text = text.split("\n").slice(offset, limit ? offset + limit : undefined).join("\n");
@@ -343,6 +360,11 @@ async function handle(req, res, u) {
       let r;
       try { r = lsTruth(TRUTH, { path }); }
       catch (e) { if (!top) throw e; r = { path, type: "dir", entries: [] }; } // spaces 还没有也别崩
+      // 顶层列 space 时附会话统计（会话数/最近活动/人数）——替代无意义的 children 计数
+      if (top && Array.isArray(r.entries)) {
+        const stats = spaceStatsTruth(TRUTH);
+        for (const e of r.entries) { const s = stats[e.name]; if (s) Object.assign(e, s); }
+      }
       return json(res, 200, r);
     } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
   }
@@ -398,7 +420,10 @@ async function handle(req, res, u) {
       }
       const csp = join(TRUTH, "spaces", space_key, "code-state.md");
       return json(res, 200, { space_key, code_state: existsSync(csp) ? readFileSync(csp, "utf8") : "（尚无 code-state，等首次 4h 轮询）" });
-    } catch (e) { return json(res, 502, { error: String(e.message || e) }); }
+    } catch (e) {
+      log.warn("github read failed", { who: req._who, space_key, err: String(e.message || e).slice(0, 200) });
+      return json(res, 502, { error: "GitHub 读取失败（详情见服务器日志）" });
+    }
   }
 
   // --- ingest（块1）---
@@ -414,15 +439,15 @@ async function handle(req, res, u) {
       return json(res, 200, { ok: true, ...r });
     } catch (e) {
       log.error("ingest failed", { who: member.id, id: payload?.id, err: e?.message });
-      return json(res, 500, { error: String(e?.message || e) });
+      return json(res, 500, { error: "ingest 失败（详情见服务器日志）" });
     }
   }
 
   json(res, 404, { error: "not found" });
 }
 
-server.listen(PORT, () =>
-  log.info("server up", { port: PORT, truth: TRUTH, members: (roster.members || []).length, tokens: tokens.size })
+server.listen(PORT, HOST, () =>
+  log.info("server up", { host: HOST, port: PORT, truth: TRUTH, members: (roster.members || []).length, tokens: tokens.size })
 );
 log.info(ASK.enabled ? "[ask] 「问一句」已启用" : "[ask] 「问一句」未启用（配 ASK_ENABLED=1 + 服务器装 codex 即开）",
   ASK.enabled ? { bin: ASK.bin, cwd: ASK.cwd } : {});

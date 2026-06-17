@@ -78,6 +78,8 @@ sudo systemctl enable --now team-brain
 curl https://brain.yourdomain.com/health   # {"ok":true}
 ```
 
+> The server binds `127.0.0.1` by default, so port 8787 is **not** reachable on the public IP — only the Caddy/HTTPS front door is. Keep it that way: if your reverse proxy runs on a different host (e.g. Docker), set `Environment=HOST=0.0.0.0` **and** firewall 8787 so only the proxy can reach it. Never expose 8787 to the internet directly (that bypasses TLS → tokens travel in plaintext).
+
 > Raw sessions are stored unredacted on disk (the redacted `.md` is what the query layer surfaces). Security rests on HTTPS + keeping this host open **only to your circle** + token auth. Don't push the truth store to any public remote.
 
 ### 1.7 Optional: GitHub code state

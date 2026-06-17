@@ -76,19 +76,43 @@ async function getCodeState(key) {
 }
 
 /* ---------- markdown 渲染（先转义再套格式，杜绝 XSS） ---------- */
-// 内联：代码 / 粗 / 斜 / 链接 / 裸 URL 自动链接（裸链接用 lookbehind 避开 href 属性内的 URL）
+// 内联：代码 / 粗 / 斜 / 删除线 / 链接 / 图片 / 裸 URL 自动链接。
+// 顺序要点：先 esc，再把行内代码抽成占位符（保护其内的 * _ ~ 不被当格式），强调在链接之前跑
+// （此刻 URL 仍是 (…) 或裸文本，下划线靠词边界规则避开 snake_case），最后还原代码。
 function inlineMd(s) {
   s = esc(s);
-  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  // 行内代码 → 占位（\uE0xx 私用区，正文几乎不会出现）；内容已被上面 esc，还原时直接用
+  const codes = [];
+  s = s.replace(/`([^`]+)`/g, (_m, c) => `${codes.push(c) - 1}`);
+  // 强调：三星=粗斜 → 双星=粗 → 单星=斜；下划线同理（仅词边界，避开 a_b_c）；删除线
+  s = s.replace(/\*\*\*([^*\n]+)\*\*\*/g, "<strong><em>$1</em></strong>");
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, u) =>
-    /^https?:\/\//.test(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener">${t}</a>` : t);
-  // 裸 URL 自动链接：用捕获前导字符代替 lookbehind（lookbehind 在老 Safari 是解析期报错 → 整站白屏）
+  s = s.replace(/___([^_\n]+)___/g, "<strong><em>$1</em></strong>");
+  s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, "$1<em>$2</em>");
+  s = s.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  // 图片：CSP 不放行外链图（img-src 'self' data:）→ 渲成可点链接而非裂图；非 http(s) 退化成 alt
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, alt, u) =>
+    /^https?:\/\//.test(u) ? `<a href="${u}" target="_blank" rel="noopener">🖼 ${alt || "图片"}</a>` : (alt || ""));
+  // 链接（可带 "title"）：仅放行 http(s)，否则退化成链接文字。u 已被 esc，不再二次转义（修 & 双重转义）
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (_m, t, u) =>
+    /^https?:\/\//.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t);
+  // 裸 URL 自动链接：捕获前导字符代替 lookbehind（lookbehind 在老 Safari 解析期报错 → 整站白屏）
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s<>"')]+)/g, (_m, pre, u) => `${pre}<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+  // 还原行内代码
+  s = s.replace(/(\d+)/g, (_m, i) => `<code>${codes[+i]}</code>`);
   return s;
 }
-// 列表（含有序 / 嵌套，按缩进入栈）
+// 列表（含有序 / 嵌套 / 任务清单，按缩进入栈）
+function listItemHtml(text) {
+  const task = text.match(/^\[( |x|X)\] ([\s\S]*)$/);
+  if (task) {
+    const checked = task[1] !== " ";
+    return `<li class="task-item"><input type="checkbox" disabled${checked ? " checked" : ""}> ${inlineMd(task[2])}`;
+  }
+  return `<li>${inlineMd(text)}`;
+}
 function listBlockHtml(items) {
   let html = "";
   const stack = [];
@@ -96,14 +120,14 @@ function listBlockHtml(items) {
     if (!stack.length || it.indent > stack[stack.length - 1].indent) {
       const tag = it.ordered ? "ol" : "ul";
       stack.push({ indent: it.indent, tag });
-      html += `<${tag}><li>${inlineMd(it.text)}`;
+      html += `<${tag}>${listItemHtml(it.text)}`;
     } else {
       while (stack.length > 1 && it.indent < stack[stack.length - 1].indent) html += `</li></${stack.pop().tag}>`;
       const want = it.ordered ? "ol" : "ul";
-      if (stack[stack.length - 1].tag !== want) {   // 同层有序↔无序切换：关旧开新，保语义
-        html += `</li></${stack.pop().tag}><${want}><li>${inlineMd(it.text)}`;
+      if (stack[stack.length - 1].tag !== want) {
+        html += `</li></${stack.pop().tag}><${want}>${listItemHtml(it.text)}`;
         stack.push({ indent: it.indent, tag: want });
-      } else html += `</li><li>${inlineMd(it.text)}`;
+      } else html += `</li>${listItemHtml(it.text)}`;
     }
   }
   while (stack.length) html += `</li></${stack.pop().tag}>`;
@@ -117,8 +141,18 @@ function tableHtml(headerLine, rows) {
   for (const r of rows) { const c = cells(r); html += `<tr>${head.map((_, j) => `<td>${inlineMd(c[j] || "")}</td>`).join("")}</tr>`; }
   return html + "</tbody></table>";
 }
+// 旧格式兜底：Codex event_msg 把换行压成空格，导致 ```lang ... ``` 内嵌在单行里。
+// 扫每一行：若行内含 ``` 但行首不是 ```，说明是内嵌代码块 → 把每段 ```...``` 展开到独立行，
+// 让下面的块级解析器能正常识别。新格式（已有换行）不受影响。
+function preExpandFences(src) {
+  return src.split("\n").map((line) => {
+    if (/^\s*```/.test(line) || !line.includes("```")) return line;
+    return line.replace(/```(\w*)\s+([\s\S]*?)\s*```/g,
+      (_, lang, body) => `\n\`\`\`${lang}\n${body.trim()}\n\`\`\`\n`);
+  }).join("\n");
+}
 function renderMd(src) {
-  const lines = String(src).replace(/\r\n/g, "\n").split("\n");
+  const lines = preExpandFences(String(src).replace(/\r\n/g, "\n")).split("\n");
   const isList = (l) => /^\s*([-*+]|\d+[.)])\s+/.test(l);
   const isHr = (l) => /^\s*([-*_])(\s*\1){2,}\s*$/.test(l);
   const isQuote = (l) => /^\s*>\s?/.test(l);
@@ -132,7 +166,11 @@ function renderMd(src) {
       const lang = f[1].trim(), buf = []; i++;
       while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
       i++;
-      html += `<pre><code${lang ? ` class="lang-${esc(lang)}"` : ""}>${esc(buf.join("\n"))}</code></pre>`;
+      const codeHtml = `<pre><code${lang ? ` class="lang-${esc(lang)}"` : ""}>${esc(buf.join("\n"))}</code></pre>`;
+      // 大代码块 / ASCII 图默认折叠（设计讨论里满屏架构图最占版面）；native <details>，零 JS、CSP 友好
+      html += buf.length > 12
+        ? `<details class="fold-code"><summary>${esc(lang || "code")} · ${buf.length} 行</summary>${codeHtml}</details>`
+        : codeHtml;
       continue;
     }
     let m;
@@ -172,20 +210,39 @@ function renderMd(src) {
 // 对话：把 transcript 的 **用户**/**助手** turn 解析成分说话人的对话块；无 turn 标记则返回 null（回退普通渲染）
 function renderTurn(t) {
   const me = t.who === "用户";
-  return `<div class="turn ${me ? "turn-user" : "turn-asst"}">
-    <div class="turn-who">${me ? "用户" : "助手"}</div>
+  // aside = 助手过程旁白，加 turn-aside 类（默认靠 CSS 在 #doc-body 上隐藏，由顶部开关统一切换）
+  const cls = `turn ${me ? "turn-user" : "turn-asst"}${t.aside ? " turn-aside" : ""}`;
+  const who = t.aside ? "助手·过程" : (me ? "用户" : "助手");
+  return `<div class="${cls}">
+    <div class="turn-who">${who}</div>
     <div class="turn-body doc">${renderMd(t.lines.join("\n").trim())}</div>
   </div>`;
 }
-function renderConversation(body, cap = Infinity) {
+function parseTurns(body) {
   const turns = []; let cur = null, inFence = false; const pre = [];
   for (const ln of String(body).split("\n")) {
     if (/^\s*```/.test(ln)) inFence = !inFence;                 // 代码块内不当 turn 边界（助手贴日志/transcript 常含 **助手**：）
-    const m = !inFence && ln.match(/^\*\*(用户|助手)\*\*[：:]\s*(.*)$/);
-    if (m) { cur = { who: m[1], lines: m[2] ? [m[2]] : [] }; turns.push(cur); }
+    const m = !inFence && ln.match(/^\*\*(用户|助手)(·过程)?\*\*[：:]\s*(.*)$/);
+    if (m) { cur = { who: m[1], aside: !!m[2], lines: m[3] ? [m[3]] : [] }; turns.push(cur); }
     else if (cur) cur.lines.push(ln);
     else pre.push(ln);                                          // 首个 turn 之前的前导内容（别丢）
   }
+  // 去重：连续同说话人、且一条是另一条前缀（用户编辑后重发）→ 只留更长那条
+  const dedup = [];
+  for (const t of turns) {
+    const prev = dedup[dedup.length - 1];
+    if (prev && prev.who === t.who && prev.aside === t.aside) {
+      const a = prev.lines.join("\n").trim(), b = t.lines.join("\n").trim();
+      if (a && b && (a.startsWith(b) || b.startsWith(a))) { if (b.length > a.length) dedup[dedup.length - 1] = t; continue; }
+    }
+    dedup.push(t);
+  }
+  return { turns: dedup, pre };
+}
+// 过程旁白条数（viewRead 据此决定要不要显示「过程旁白」开关）
+function countAside(body) { return parseTurns(body).turns.filter((t) => t.aside).length; }
+function renderConversation(body, cap = Infinity) {
+  const { turns, pre } = parseTurns(body);
   if (!turns.length) return null;
   const preHtml = pre.join("\n").trim() ? `<div class="doc">${renderMd(pre.join("\n"))}</div>` : "";
   const shown = Math.min(turns.length, cap);                    // 超长对话先渲前 cap 条，避免一次塞几千 DOM
@@ -196,7 +253,7 @@ function splitFm(text) {
   const m = text.match(/^---\n([\s\S]*?)\n---\n?/);
   if (!m) return { meta: {}, body: text };
   const meta = {};
-  for (const ln of m[1].split("\n")) { const i = ln.indexOf(":"); if (i > 0) meta[ln.slice(0, i).trim()] = ln.slice(i + 1).trim().replace(/^["']|["']$/g, ""); }
+  for (const ln of m[1].split("\n")) { const i = ln.indexOf(":"); if (i > 0) meta[ln.slice(0, i).trim()] = ln.slice(i + 1).trim().replace(/^(["'])([\s\S]*)\1$/, "$2"); }
   return { meta, body: text.slice(m[0].length) };
 }
 /* 解析 code-state.md（codestate.mjs 的固定结构）→ {branches, pulls, noAccess} */
@@ -229,10 +286,31 @@ function connectPrompt() {
   return `<div class="view"><div class="notice">
     <strong>先连接真相库</strong>
     <p class="muted small" style="margin:8px 0 16px">真相层是全队 session / 文档 / 代码状态的私有库，需要你的个人 token 才能浏览。</p>
-    <button class="btn" onclick="openTokenModal()">连接 token</button>
+    <button class="btn" data-action="openTokenModal">连接 token</button>
   </div></div>`;
 }
 const crumb = (...parts) => `<div class="crumb">${parts.map((p, i) => (i ? `<span class="sep">/</span>` : "") + p).join("")}</div>`;
+
+// 图标集（line 风格，currentColor 描边；GitHub 沿用其官方实心 mark）。详情页操作条统一用它。
+const ICONS = {
+  agent: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><path d="M9 13h.01M15 13h.01M2 14h2M20 14h2"/></svg>`,
+  link: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>`,
+  github: `<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>`,
+  external: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`,
+  eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  code: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>`,
+};
+// 图标按钮：图标 + 二字标签竖排；title 给完整说明（hover 原生 tooltip + 无障碍）。tag 可为 a（外链）或 button。
+function actBtn(icon, label, { tag = "button", cls = "", attrs = "", title = label } = {}) {
+  return `<${tag} class="act-btn ${cls}" title="${esc(title)}" aria-label="${esc(title)}" ${attrs}>` +
+    `<span class="act-ico">${ICONS[icon]}</span><span class="act-label">${esc(label)}</span></${tag}>`;
+}
+// 分享：①投喂（复制现成话术，含 path，粘进 Claude Code/Codex 即用已有 read 工具喂给你的 agent）②链接（人与人）。
+// 复制走 data-copy 委托（见 init），CSP 友好。
+function shareBtns(url, agentMsg) {
+  return actBtn("agent", "投喂", { cls: "act-primary", title: "投喂给 Agent — 复制喂给你 agent 的话术（含真相库 path）", attrs: `type="button" data-copy="${esc(agentMsg)}" data-done="已复制"` }) +
+    actBtn("link", "链接", { title: "复制网页链接（分享给人，点开即看）", attrs: `type="button" data-copy="${esc(url)}" data-done="已复制"` });
+}
 
 /* ============================================================ 总览（默认 dashboard） ============================================================ */
 async function viewOverview() {
@@ -316,7 +394,8 @@ async function viewRepos() {
   main.innerHTML = loading("加载仓库");
   let spaces; try { spaces = await getSpaces(); } catch (e) { main.innerHTML = errView(e); return; }
   const gh = spaces.filter((e) => e.name.startsWith("github__"));
-  const active = gh.filter((e) => e.active), reg = gh.filter((e) => !e.active);
+  const active = gh.filter((e) => e.active).sort((a, b) => (b.last_active || "").localeCompare(a.last_active || ""));  // 最近活动倒序
+  const reg = gh.filter((e) => !e.active);
   main.innerHTML = `<div class="view">
     ${crumb(`<a href="#/">总览</a>`, `<span class="cur">仓库</span>`)}
     <div class="page-head"><h1>GitHub 仓库</h1><p class="sub">团队登记的仓（registry）。活跃 = 有 session；每仓的代码状态来自 4h 轮询的 code-state。</p></div>
@@ -340,7 +419,9 @@ function repoCard(e) {
       <span class="sp-dot${e.active ? " on" : ""}"></span>
       <span class="name">${esc(name)}</span><span class="tag gh">github</span><span class="repo-badge"></span>
     </div>
-    <div class="cmeta">${e.active ? "活跃" : "仅登记"} · ${e.children ?? 0} 项</div>
+    <div class="cmeta">${e.active
+      ? `活跃 · ${e.sessions ?? 0} 会话 · ${e.last_active ? ago(e.last_active) : "—"}${e.people > 1 ? ` · ${e.people} 人` : ""}`
+      : "仅登记"}</div>
   </a>`;
 }
 
@@ -444,7 +525,7 @@ async function viewSessions(q) {
       <select id="f-author"><option value="">全部人</option>${(roster || []).map((m) => `<option value="${esc(m.id)}" ${q.author === m.id ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select>
       <select id="f-space"><option value="">全部仓库</option>${ghRepos.map((e) => `<option value="${esc(e.name)}" ${q.space === e.name ? "selected" : ""}>${esc(spaceLabel(e.name).name)}</option>`).join("")}</select>
       <input id="f-since" placeholder="自 (2026-06-01)" value="${esc(q.since || "")}">
-      <button class="btn-ghost" onclick="applySessions()">筛选</button>
+      <button class="btn-ghost" data-action="applySessions">筛选</button>
     </div>
     <div id="ses-list">${loadingInline()}</div>
   </div>`;
@@ -560,7 +641,7 @@ async function viewSearch(q) {
     <div class="filters">
       <input id="s-q" placeholder="正则 / 关键词…" value="${esc(term)}" style="flex:1;min-width:240px" autofocus>
       <label class="muted small" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="s-raw" ${q.raw ? "checked" : ""}> 连原文 jsonl</label>
-      <button class="btn" onclick="applySearch()">搜索</button>
+      <button class="btn" data-action="applySearch">搜索</button>
     </div>
     <div id="gres">${term ? loadingInline("搜索中") : `<div class="muted small">输入关键词开始搜索。</div>`}</div>
   </div>`;
@@ -618,37 +699,61 @@ async function viewRead(q) {
   const branch = spaceKey && parts[2] === "sessions" ? parts[3] : null;
   const isSession = spaceKey && parts[2] === "sessions";
   const conv = isSession ? renderConversation(body, 80) : null;   // session → 分说话人对话块（超长先渲前 80 条）；否则普通文档
+  const asideN = isSession ? countAside(body) : 0;                 // 过程旁白条数（>0 才显示开关）
+  const shareUrl = location.origin + location.pathname + "#/read?path=" + enc(path);   // 人与人分享：可点开的网页链接
+  const agentMsg = `用 team-brain 读取并讲解这条记录，作为接下来讨论的上下文：${path}`;   // 给 Agent：现成话术（含 path，agent 用已有 read 工具取全文）
   const title = meta.title || parts[parts.length - 1];
-  // session：链回它所属仓库 + 分支（github）
-  let ghLink = "";
+  // session：链回它所属仓库 + 分支（github）→ 图标按钮
+  let ghBtn = "";
   if (spaceKey?.startsWith("github__")) {
     const base = `https://github.com/${spaceLabel(spaceKey).name}`;
-    ghLink = `<a class="btn-ghost" href="${esc(branch ? base + "/tree/" + branch : base)}" target="_blank" rel="noopener">GitHub${branch ? " · " + esc(branch) : ""} ↗</a>`;
+    ghBtn = actBtn("github", "代码", { tag: "a", title: "在 GitHub 打开" + (branch ? "（" + branch + "）" : ""), attrs: `href="${esc(branch ? base + "/tree/" + branch : base)}" target="_blank" rel="noopener"` });
   }
+  const feishuBtn = (meta.url && /^https?:/.test(meta.url))
+    ? actBtn("external", "飞书", { tag: "a", title: "在飞书打开原文", attrs: `href="${esc(meta.url)}" target="_blank" rel="noopener"` }) : "";
   const crumbParts = [`<a href="#/">总览</a>`];
   if (spaceKey) crumbParts.push(`<a href="${spaceHref(spaceKey)}">${esc(spaceLabel(spaceKey).name)}</a>`);
   else if (parts[0] === "feishu") crumbParts.push(`<a href="#/docs">文档</a>`);
   crumbParts.push(`<span class="cur">${esc(parts[parts.length - 1])}</span>`);
 
-  main.innerHTML = `<div class="view">
+  main.innerHTML = `<div class="view view-doc">
     ${crumb(...crumbParts)}
-    <div class="repo-head">
-      <h1 style="line-height:1.3">${esc(title)}</h1>
-      <div style="display:flex;gap:8px">${ghLink}${meta.url && /^https?:/.test(meta.url) ? `<a class="btn-ghost" href="${esc(meta.url)}" target="_blank" rel="noopener">在飞书打开 ↗</a>` : ""}</div>
+    <div class="doc-actions">
+      ${shareBtns(shareUrl, agentMsg)}${ghBtn}${feishuBtn}
+      ${asideN ? actBtn("eye", "旁白", { title: `显示 / 隐藏过程旁白（${asideN} 条）`, attrs: `type="button" id="aside-toggle"` }) : ""}
+      ${actBtn("code", "原文", { title: "切换原文 / 渲染", attrs: `type="button" id="raw-toggle"` })}
     </div>
-    ${Object.keys(meta).length ? `<div class="meta-card">${metaCard(meta)}</div>` : ""}
-    <div style="display:flex;justify-content:flex-end;margin-bottom:var(--sp-4)"><button class="raw-toggle" id="raw-toggle" type="button">显示原文</button></div>
+    <div class="repo-head"><h1 style="line-height:1.3">${esc(title)}</h1></div>
+    ${Object.keys(meta).length ? `<details class="meta-card"><summary>${metaSummary(meta)}</summary><div class="meta-grid">${metaCard(meta)}</div></details>` : ""}
     <div id="doc-body">${conv || `<div class="doc">${renderMd(body)}</div>`}</div>
     <div class="raw" id="raw-body" hidden><pre><code>${esc(data.text)}</code></pre></div>
   </div>`;
   $("#conv-expand")?.addEventListener("click", () => { $("#doc-body").innerHTML = renderConversation(body); });  // 展开全部对话
+  // 过程旁白开关：切 #doc-body 的 show-aside 类（CSS 控制 .turn-aside 显隐）。类挂在 doc-body 本身，
+  // 展开剩余对话只改 innerHTML 不动这个类 → 状态不丢。
+  const asideBtn = $("#aside-toggle");
+  asideBtn?.addEventListener("click", () => {
+    const on = $("#doc-body").classList.toggle("show-aside");
+    asideBtn.classList.toggle("act-on", on);   // 标签固定「旁白」，开启态用绿色描边表示
+  });
   const tog = $("#raw-toggle");
   tog.addEventListener("click", () => {
     const raw = $("#raw-body"), doc = $("#doc-body"), hidden = raw.hasAttribute("hidden");
     raw.toggleAttribute("hidden", !hidden); doc.toggleAttribute("hidden", hidden);
-    tog.textContent = hidden ? "显示渲染" : "显示原文";
+    tog.classList.toggle("act-on", hidden);
+    const lbl = tog.querySelector(".act-label"); if (lbl) lbl.textContent = hidden ? "渲染" : "原文";
   });
   highlightSidebar();
+}
+// 元数据折叠后的一行摘要：谁 · 时间 · 分支 · 工具
+function metaSummary(meta) {
+  const bits = [];
+  const who = meta.producer || meta.submitter || meta.author;
+  if (who) bits.push(esc(who));
+  if (meta.date || meta.updated) bits.push(esc(fmtDate(meta.updated || meta.date)));
+  if (meta.branch && meta.branch !== "-") bits.push(esc(meta.branch));
+  if (meta.tool) bits.push(esc(meta.tool));
+  return bits.length ? bits.join(" · ") : "详情";
 }
 function metaCard(meta) {
   const order = ["producer", "submitter", "author", "space_key", "branch", "folder", "tool", "date", "updated", "url", "edited", "ref", "visibility", "default_branch"];
@@ -694,14 +799,14 @@ async function loadSidebar() {
   if (!getToken()) { box.innerHTML = `<div class="muted small pad">连接后显示仓库</div>`; return; }
   let spaces; try { spaces = await getSpaces(); } catch { box.innerHTML = `<div class="muted small pad">加载失败</div>`; return; }
   const gh = spaces.filter((e) => e.name.startsWith("github__"));
-  const active = gh.filter((e) => e.active).sort((a, b) => a.name.localeCompare(b.name));
+  const active = gh.filter((e) => e.active).sort((a, b) => (b.last_active || "").localeCompare(a.last_active || ""));  // 最近活动倒序
   box.innerHTML = (active.length ? active.map(spaceRowSide).join("") : `<div class="muted small pad">暂无活跃仓库</div>`)
     + `<a class="space-row" href="#/repos" style="color:var(--muted)"><span class="sp-name">查看全部仓库 →</span></a>`;
   highlightSidebar();
 }
 function spaceRowSide(e) {
   return `<a class="space-row is-active" data-key="${esc(e.name)}" href="#/repo/${enc(e.name)}">
-    <span class="sp-dot"></span><span class="sp-name">${esc(spaceLabel(e.name).name)}</span><span class="sp-count">${e.children ?? 0}</span>
+    <span class="sp-dot"></span><span class="sp-name">${esc(spaceLabel(e.name).name)}</span><span class="sp-count">${e.last_active ? ago(e.last_active) : ""}</span>
   </a>`;
 }
 function highlightSidebar() {
@@ -795,6 +900,26 @@ async function init() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") { e.preventDefault(); $("#search-input").focus(); }
     if (e.key === "Escape") { closeTokenModal(); document.body.classList.remove("nav-open"); }
+  });
+
+  // 委托式按钮（替代内联 onclick → 满足严格 CSP script-src 'self'）。白名单挡住任意全局调用。
+  const ACTIONS = { openTokenModal, applySessions: window.applySessions, applySearch: window.applySearch };
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-action]");
+    if (el) ACTIONS[el.getAttribute("data-action")]?.();
+  });
+  // 分享按钮：复制 data-copy 到剪贴板，按钮短暂回显 data-done（HTTPS/localhost 才有 clipboard API）
+  document.addEventListener("click", async (e) => {
+    const el = e.target.closest("[data-copy]");
+    if (!el) return;
+    const lbl = el.querySelector(".act-label") || el;
+    try {
+      await navigator.clipboard.writeText(el.getAttribute("data-copy"));
+      const prev = lbl.textContent;
+      lbl.textContent = el.getAttribute("data-done") || "已复制";
+      el.classList.add("act-done");   // 临时强制展开文字 + 变绿（图标态也看得见反馈）
+      setTimeout(() => { el.classList.remove("act-done"); lbl.textContent = prev; }, 1500);
+    } catch { lbl.textContent = "复制失败"; el.classList.add("act-done"); }
   });
 
   window.addEventListener("hashchange", route);
