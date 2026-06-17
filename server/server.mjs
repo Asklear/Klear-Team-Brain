@@ -3,9 +3,10 @@
 // 本地先 HTTP；公网部署时套 HTTPS（域名+证书）。token 鉴权走 team.yaml。
 import http from "node:http";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, extname } from "node:path";
 import { readFileSync, existsSync, createReadStream, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { loadRoster, loadTokens, tokenIndex } from "../core/team.mjs";
 import { loadRegistry, patFor, hasGithub } from "../core/registry.mjs";
@@ -19,13 +20,20 @@ import { initTruth } from "./gitstore.mjs";
 import { ingest } from "./ingest.mjs";
 import { refreshAll, enumAndRegisterOrgRepos } from "./codestate.mjs";
 import { syncFeishuDocs } from "./feishudocs.mjs";
-import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth } from "./query.mjs";
+import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, frontmatterOf } from "./query.mjs";
 import { canonicalizePath, canonicalSpaceKey } from "../core/identity.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TRUTH = process.env.TRUTH_DIR || join(ROOT, "truth-server");
+const WEB_DIR = join(ROOT, "web");                 // 真相层 Web GUI 静态资源（无密钥）
 const PORT = Number(process.env.PORT) || 8787;
 const MAX_BODY = 64 * 1024 * 1024;
+// Web GUI 静态资源：只认这些扩展名（不会撞到无扩展名的 API 路由如 /grep /ls）
+const WEB_TYPES = {
+  ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".ico": "image/x-icon",
+  ".png": "image/png", ".woff2": "font/woff2", ".map": "application/json",
+};
 
 const roster = loadRoster(join(ROOT, "team.yaml"));
 const tokens = tokenIndex(roster, loadTokens(process.env.TOKENS_FILE || join(ROOT, "tokens.yaml")));
@@ -35,6 +43,32 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN
       ? readFileSync(process.env.GITHUB_TOKEN_FILE, "utf8").trim() : "");
 const FEISHU = loadFeishu(process.env.FEISHU_FILE || join(ROOT, "feishu.yaml"));  // 文档层（飞书）凭证：缺则不启用
 initTruth(TRUTH);
+
+// 「问一句」理解层（可选）：复用服务器上已装的 codex（或任意 agent CLI）当引擎。
+// 配了 ASK_ENABLED=1 才启用；二进制/参数全走 env，便于在服务器上不改代码调参。off 时网站问答 UI 自动隐藏。
+const pexec = promisify(execFile);
+const ASK = {
+  enabled: process.env.ASK_ENABLED === "1",
+  bin: process.env.ASK_CODEX_BIN || "codex",
+  args: (process.env.ASK_CODEX_ARGS || "exec --skip-git-repo-check").split(/\s+/).filter(Boolean),
+  cwd: process.env.ASK_CWD || TRUTH,                         // 默认在真相库里跑 → codex 直接 grep/read .md
+  timeout: Number(process.env.ASK_TIMEOUT_MS) || 120000,     // 单次问答超时（agent 多回合，给足）
+  max: Number(process.env.ASK_MAX_CONCURRENT) || 2,          // 并发上限，挡住成本/滥用
+};
+let askInflight = 0;
+const ASK_HINT = "你在团队大脑「真相库」（一个 git 仓）当前目录里回答问题。库里有：spaces/<repo>/sessions/**/*.md（全队脱敏对话 transcript）、feishu/**/*.md（飞书文档镜像）、spaces/<repo>/code-state.md（代码状态）。请用 grep/read 翻这些 .md 文件，给出综合答复，并在末尾列出你引用的文件 path。不要读 .jsonl（用 .md）。问题：\n\n";
+// 从 codex 输出里抽最终答复：--json 模式解 JSONL 取末条 agent 消息；否则直接回 stdout。
+const extractAnswer = (out) => {
+  const s = String(out || "").trim();
+  if (!ASK.args.includes("--json")) return s;
+  let ans = "";
+  for (const line of s.split("\n")) {
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    const t = o?.msg?.content ?? o?.message ?? (o?.type && /agent_message|assistant/i.test(o.type) ? (o.text ?? o.content) : "");
+    if (typeof t === "string" && t.trim()) ans = t.trim();
+  }
+  return ans || s;
+};
 
 // 客户端自托管：把这份客户端代码打成 tarball（无密钥），供新人 `curl /get | bash` 下载。
 const CLIENT_TGZ = "/tmp/team-brain-client.tgz";
@@ -176,6 +210,22 @@ async function handle(req, res, u) {
   // --- 健康检查 ---
   if (req.method === "GET" && u.pathname === "/health") return json(res, 200, { ok: true });
 
+  // --- 真相层 Web GUI（静态资源，无密钥、无需鉴权；背后的数据接口仍需 token）---
+  // 根路径回 index.html；带已知扩展名的请求映射到 web/ 下的文件（路径穿越靠 safeRelPath 兜底）。
+  if (req.method === "GET" && (u.pathname === "/" || WEB_TYPES[extname(u.pathname)])) {
+    const rel = u.pathname === "/" ? "index.html" : u.pathname.replace(/^\/+/, "");
+    let abs;
+    try { abs = safeRelPath(WEB_DIR, rel, "asset"); } catch { return json(res, 400, { error: "bad path" }); }
+    if (!existsSync(abs) || statSync(abs).isDirectory()) return json(res, 404, { error: "not found" });
+    const ext = extname(abs);
+    // html 总是重新校验（拿最新视图）；其余静态资源缓存 5 分钟，字体 1 天
+    const cache = ext === ".html" ? "no-cache"
+      : ext === ".woff2" ? "public, max-age=86400"
+      : "public, max-age=300";
+    res.writeHead(200, { "content-type": WEB_TYPES[ext] || "application/octet-stream", "cache-control": cache });
+    return createReadStream(abs).pipe(res);
+  }
+
   // --- 客户端自托管（无需鉴权，代码不含密钥）---
   if (req.method === "GET" && u.pathname === "/get") {
     // Host 会被写进 curl|bash 的脚本里，必须挡住注入：要么用配好的 PUBLIC_URL，要么白名单校验 Host
@@ -195,6 +245,40 @@ async function handle(req, res, u) {
   if (req.method === "GET" && u.pathname === "/whoami") {
     const m = authMember(req);
     return m ? json(res, 200, { id: m.id, name: m.name }) : json(res, 401, { error: "invalid token" });
+  }
+
+  // --- 花名册（Web GUI「人」视图用）：team.yaml 非机密，只回 id/name，不含 token ---
+  if (req.method === "GET" && u.pathname === "/roster") {
+    if (!authMember(req)) return json(res, 401, { error: "invalid token" });
+    return json(res, 200, { members: (roster.members || []).map((m) => ({ id: m.id, name: m.name || m.id })) });
+  }
+
+  // --- 能力位（Web GUI 据此决定显隐可选功能）---
+  if (req.method === "GET" && u.pathname === "/capabilities") {
+    if (!authMember(req)) return json(res, 401, { error: "invalid token" });
+    return json(res, 200, { ask: ASK.enabled, feishu: !!FEISHU });
+  }
+
+  // --- 「问一句」：spawn 服务器上的 codex 现查真相库 → 综合答复（可选，ASK_ENABLED 才开）---
+  if (req.method === "POST" && u.pathname === "/ask") {
+    const m = authMember(req);
+    if (!m) return json(res, 401, { error: "invalid token" });
+    if (!ASK.enabled) return json(res, 503, { error: "问答未启用（服务器未配 ASK_ENABLED + codex）" });
+    if (askInflight >= ASK.max) return json(res, 429, { error: "问答繁忙，请稍后再试" });
+    let body; try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: "bad json" }); }
+    const q = String(body?.q || "").trim();
+    if (!q) return json(res, 400, { error: "missing q" });
+    if (q.length > 1000) return json(res, 400, { error: "问题过长（>1000 字）" });
+    askInflight++;
+    const t0 = Date.now();
+    try {
+      const { stdout } = await pexec(ASK.bin, [...ASK.args, ASK_HINT + q], { cwd: ASK.cwd, timeout: ASK.timeout, maxBuffer: 16 * 1024 * 1024 });
+      log.info("ask ok", { who: m.id, ms: Date.now() - t0, qlen: q.length });
+      return json(res, 200, { answer: extractAnswer(stdout) });
+    } catch (e) {
+      log.warn("ask failed", { who: m.id, ms: Date.now() - t0, err: String(e.message || e).slice(0, 200) });
+      return json(res, 502, { error: "问答失败：" + String(e.message || e).slice(0, 200) });
+    } finally { askInflight--; }
   }
 
   // --- 读真相库任意文件（深挖；统一 path 坐标，grep/find/ls 命中的 path 直接拿来读）---
@@ -224,6 +308,14 @@ async function handle(req, res, u) {
         path: fpath ? resolvePath(fpath) : undefined,   // 接受别名/历史坐标（兜底）
         limit: u.searchParams.get("limit"),
       });
+      // meta=1：顺带回每个文件的 frontmatter（服务端一次读完，省客户端 N+1 次 /read；走 query 的 mtime 缓存）
+      if (u.searchParams.get("meta") === "1" && Array.isArray(r.files)) {
+        const keys = ["title", "edited", "date", "updated", "producer", "submitter", "tool", "space_key", "branch"];
+        r.files = r.files.map((rel) => {
+          try { return { path: rel, meta: frontmatterOf(safeRelPath(TRUTH, rel, "path"), keys) || {} }; }
+          catch { return { path: rel, meta: {} }; }
+        });
+      }
       return json(res, 200, r);
     } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
   }
@@ -280,6 +372,7 @@ async function handle(req, res, u) {
         since: u.searchParams.get("since") || undefined,
         until: u.searchParams.get("until") || undefined,
         limit: u.searchParams.get("limit"),
+        withIngestDate: u.searchParams.get("ingest_date") === "1",   // 入库时间按需（贵：每条一次 git log）
         roster, registry,
       });
       return json(res, 200, r);
@@ -331,9 +424,15 @@ async function handle(req, res, u) {
 server.listen(PORT, () =>
   log.info("server up", { port: PORT, truth: TRUTH, members: (roster.members || []).length, tokens: tokens.size })
 );
+log.info(ASK.enabled ? "[ask] 「问一句」已启用" : "[ask] 「问一句」未启用（配 ASK_ENABLED=1 + 服务器装 codex 即开）",
+  ASK.enabled ? { bin: ASK.bin, cwd: ASK.cwd } : {});
+
+// 本地静态开发模式：NO_POLL=1 跳过两个后台轮询（不出网、不改写 TRUTH）→ 拿静态 fixtures 开发 web GUI
+const NO_POLL = process.env.NO_POLL === "1";
+if (NO_POLL) log.info("[no-poll] 后台轮询已关（NO_POLL=1）：code-state / feishu 同步跳过，TRUTH 保持静态");
 
 // code-state 4h 轮询（registry 有 github 登记、或配了全局 GITHUB_TOKEN 就启用）
-if (GITHUB_TOKEN || hasGithub(registry)) {
+if (!NO_POLL && (GITHUB_TOKEN || hasGithub(registry))) {
   // 启动时按 registry 枚举 org/repo → 预登记 space（无 session 也建），再跑首轮 code-state（懒加载只刷有 session 的）
   // 每个仓用它该用的 PAT：org 一把覆盖全部 repo、单独登记的 repo 每仓一把、否则回退全局 GITHUB_TOKEN
   const tick = () => enumAndRegisterOrgRepos(TRUTH, registry, GITHUB_TOKEN)
@@ -349,7 +448,7 @@ if (GITHUB_TOKEN || hasGithub(registry)) {
 }
 
 // 飞书文档镜像轮询（配了 feishu.yaml 就启用）：单向拉 wiki 正文进 feishu/ 子树，grep/read 即可搜
-if (FEISHU) {
+if (!NO_POLL && FEISHU) {
   const freq = makeReq(FEISHU);
   const ftick = () => syncFeishuDocs(TRUTH, freq, { wikiBase: FEISHU.wiki_base })
     .then((r) => log.info("[feishu-docs] 同步完成", { spaces: r.spaces, written: r.written, pruned: r.pruned, skipped: r.skipped, errors: r.errors }))

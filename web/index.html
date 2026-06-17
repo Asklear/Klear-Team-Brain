@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>team-brain · 真相层</title>
+<meta name="description" content="团队项目大脑的真相层 —— 浏览全队 session、飞书文档、代码状态与活动流。">
+<meta name="theme-color" content="#fbfbf9">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23fbfbf9'/%3E%3Crect x='7.5' y='7.5' width='17' height='17' rx='4' fill='none' stroke='%2315803d' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%2315803d'/%3E%3C/svg%3E">
+<link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/jbmono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/design-tokens.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="nav-toggle" id="nav-toggle" type="button" aria-label="菜单" aria-expanded="false">☰</button>
+  <a class="brand" href="#/">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">team-brain</span>
+    <span class="brand-tag">真相层</span>
+  </a>
+  <form class="search" id="search-form" autocomplete="off">
+    <input id="search-input" type="search" placeholder="grep 全队真相库…  ( / 聚焦)" aria-label="搜索真相库">
+  </form>
+  <button class="token-chip" id="token-chip" type="button" title="连接 / 切换 token">
+    <span class="dot" id="token-dot"></span>
+    <span id="token-label">未连接</span>
+  </button>
+</header>
+
+<div class="nav-scrim" id="nav-scrim"></div>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <nav class="nav">
+      <a href="#/" data-nav="/" class="nav-item">总览</a>
+      <a href="#/repos" data-nav="/repos" class="nav-item">仓库</a>
+      <a href="#/sessions" data-nav="/sessions" class="nav-item">会话</a>
+      <a href="#/docs" data-nav="/docs" class="nav-item">文档</a>
+      <a href="#/people" data-nav="/people" class="nav-item">人</a>
+    </nav>
+    <div class="rail-section" id="spaces-rail">
+      <div class="rail-head">活跃仓库</div>
+      <div class="rail-body" id="spaces-list"><div class="muted small pad">…</div></div>
+    </div>
+  </aside>
+
+  <main class="main" id="main"><!-- 视图渲染于此 --></main>
+</div>
+
+<!-- token 连接弹层 -->
+<div class="modal-backdrop" id="token-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="token-title">
+    <h2 id="token-title">连接到真相库</h2>
+    <p class="muted small">粘贴你的个人 token（即 <code>client.config.yaml</code> 里那串，或管理员发你的）。仅存在本浏览器的 localStorage，只随请求发往真相库服务器。</p>
+    <input id="token-input" type="password" placeholder="粘贴 token…" spellcheck="false">
+    <div id="token-err" class="token-err" hidden></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="token-clear" type="button">断开</button>
+      <button class="btn" id="token-save" type="button">连接</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 // 只读、带超时与输出上限。给客户端 Agent 一个比 4 个死板原语更灵活的检索面，且零服务器 LLM。
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
+import { readdirSync, statSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, relative } from "node:path";
 import { safeSegment, safeRelPath } from "../core/safe.mjs";
 import { fm } from "../core/card.mjs";
@@ -120,9 +120,12 @@ async function ingestDateOf(TRUTH, rel) {
 // 正文首行预览（frontmatter 之后），给 agent 一眼判断要不要深读。压成单行、截短。
 function previewOf(text) {
   const body = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  for (const line of body.split("\n")) {
-    const t = line.replace(/^#+\s*/, "").trim();
-    if (t) return t.replace(/\s+/g, " ").slice(0, 160);
+  for (const raw of body.split("\n")) {
+    // 跳过说话人标签行（**用户**： / **助手**：）——内容现在在它下一行；取第一句有意义的内容
+    let t = raw.replace(/^#+\s*/, "").replace(/^\*\*(用户|助手)\*\*[：:]\s*/, "").trim();
+    if (!t) continue;
+    t = t.replace(/^[->*\s]+/, "").replace(/[*`#]/g, "");  // 去列表/引用前缀和基础 md 记号，预览更干净
+    if (t.trim()) return t.replace(/\s+/g, " ").trim().slice(0, 160);
   }
   return "";
 }
@@ -132,41 +135,71 @@ function previewOf(text) {
 //   不是 commit 时间 → 批量回填也能按"真实何时干活"过滤排序，事故必然被查到。
 // 身份走花名册归一（tqt==taoqitian），坐标走 canonical（haurhi→Asklear）→ 返回的坐标能被 read 直接消费。
 // 不落索引文件（守"视图可重建/别把索引塞落盘层"不变量）：现读卡片 frontmatter，零持久态、零漂移。
-export async function sessionsTruth(TRUTH, { author, space, since, until, limit = 50, roster = { members: [] }, registry = {} } = {}) {
+// frontmatter 头部读取，按 mtime 缓存：只读前 HEAD_BYTES（不整文件读，session 可达 MB 级），
+// frontmatter + 预览首行都在头部。sessionsTruth 与 /find?meta 共用这一个 IO 原语。
+const HEAD_BYTES = 8192;
+const headCache = new Map();   // absPath -> { mtimeMs, head }
+function headOf(absPath) {
+  let st; try { st = statSync(absPath); } catch { return null; }
+  const hit = headCache.get(absPath);
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.head;
+  let head = "";
+  try {
+    const fd = openSync(absPath, "r");
+    try { const len = Math.min(HEAD_BYTES, st.size); const buf = Buffer.alloc(len); const n = readSync(fd, buf, 0, len, 0); head = buf.toString("utf8", 0, n); }
+    finally { closeSync(fd); }
+  } catch { return null; }
+  headCache.set(absPath, { mtimeMs: st.mtimeMs, head });
+  return head;
+}
+// 批量取 frontmatter 字段（给定 key 列表）→ {k:v}（仅非空键）；缺文件返回 null。
+export function frontmatterOf(absPath, keys) {
+  const head = headOf(absPath); if (head == null) return null;
+  const o = {}; for (const k of keys) { const v = fm(head, k); if (v) o[k] = v; }
+  return o;
+}
+function sessionFields(mdPath, rel) {
+  const head = headOf(mdPath); if (head == null) return null;
+  const date = fm(head, "date");
+  if (!date) return null;                                // 非 session 卡片（无 date）
+  const parts = rel.split("/");
+  return {
+    date, updated: fm(head, "updated") || date, producer_id: fm(head, "producer_id"),
+    author: fm(head, "submitter") || fm(head, "producer"), tool: fm(head, "tool"),
+    space_key: parts[1] || "", branch: parts[3] || "", file: parts[parts.length - 1],
+    preview: previewOf(head),
+  };
+}
+
+export async function sessionsTruth(TRUTH, { author, space, since, until, limit = 50, withIngestDate = false, roster = { members: [] }, registry = {} } = {}) {
   const resolved = resolveAuthorQuery(roster, author);
   const wantSpace = space ? canonicalSpaceKey(registry, space) : null;
   const sinceD = since ? String(since).slice(0, 10) : null;
   const untilD = until ? String(until).slice(0, 10) : null;
-  const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const n = Math.min(Math.max(Number(limit) || 50, 1), 500);
   const rows = [];
   for (const mdPath of walkMd(join(TRUTH, "spaces"))) {
     const rel = relative(TRUTH, mdPath);
     if (!rel.includes("/sessions/")) continue;          // 只看 session 卡片，skip code-state 等
-    let text; try { text = readFileSync(mdPath, "utf8"); } catch { continue; }
-    const head = text.slice(0, 4096);
-    const date = fm(head, "date");                        // 首条消息时间（工作起）
-    if (!date) continue;                                  // 无 date → 非 session 卡片
-    const updated = fm(head, "updated") || date;          // 末条输入时间（工作止）= 用户心智里"session 的时间"
-    // 坐标用【真实落盘位置】（path 的 space 段）→ 与 path 一致、能被 read 直接消费；
-    // 过滤才按 canonical 比较（别名/历史 owner 也能命中），不把输出坐标改到一个可能不存在的位置。
-    const realSpace = rel.split("/")[1] || "";
-    if (wantSpace && canonicalSpaceKey(registry, realSpace) !== wantSpace) continue;
-    const producerId = fm(head, "producer_id");
-    const submitter = fm(head, "submitter") || fm(head, "producer");
-    if (!authorMatches(resolved, { producerId, author: submitter })) continue;
-    const ws = date.slice(0, 10), we = updated.slice(0, 10);
-    if (sinceD && we < sinceD) continue;                  // 工作区间 [ws,we] 与查询窗 [since,until] 不相交 → 排除
+    const f = sessionFields(mdPath, rel);
+    if (!f) continue;                                    // 无 date → 非 session 卡片
+    // 坐标用【真实落盘位置】；过滤按 canonical 比较（别名/历史 owner 也命中）
+    if (wantSpace && canonicalSpaceKey(registry, f.space_key) !== wantSpace) continue;
+    if (!authorMatches(resolved, { producerId: f.producer_id, author: f.author })) continue;
+    const ws = f.date.slice(0, 10), we = f.updated.slice(0, 10);
+    if (sinceD && we < sinceD) continue;                  // 工作区间 [ws,we] 与查询窗不相交 → 排除
     if (untilD && ws > untilD) continue;
-    const parts = rel.split("/");
     rows.push({
-      path: rel, space_key: realSpace, branch: parts[3] || "", file: parts[parts.length - 1],
-      producer_id: producerId, author: submitter, tool: fm(head, "tool"),
-      work_start: date, work_end: updated, preview: previewOf(text),
+      path: rel, space_key: f.space_key, branch: f.branch, file: f.file,
+      producer_id: f.producer_id, author: f.author, tool: f.tool,
+      work_start: f.date, work_end: f.updated, preview: f.preview,
     });
   }
   rows.sort((a, b) => (b.work_end || "").localeCompare(a.work_end || ""));  // 默认按末次活动倒序
   const top = rows.slice(0, n);
-  for (const r of top) r.ingest_date = await ingestDateOf(TRUTH, r.path);   // 两种时间都带上、标注清楚
+  // ingest_date（入库时间）要对每条单跑一次 git log → N 次子进程，慢。默认不带；
+  // 只有显式 withIngestDate 时才算（web 列表用 work_start/work_end，不需要它）。
+  if (withIngestDate) for (const r of top) r.ingest_date = await ingestDateOf(TRUTH, r.path);
   return { sessions: top, total: rows.length, truncated: rows.length > n };
 }
 
@@ -180,7 +213,8 @@ export async function findTruth(TRUTH, { name = "*", path = "", limit = 200 } = 
   if (rel) safeRelPath(TRUTH, rel, "path");                // 锁死在 TRUTH 内
   const n = Math.min(Math.max(Number(limit) || 200, 1), 1000);
   const spec = rel ? `:(glob)${rel}/**/${nm}` : `:(glob)**/${nm}`;
-  const { stdout } = await pexec("git", ["-C", TRUTH, "ls-files", "--", spec],
+  // core.quotePath=false：别把中文/空格文件名 C-quote 成带引号的转义串（否则下游 /read 拿到的路径打不开）
+  const { stdout } = await pexec("git", ["-C", TRUTH, "-c", "core.quotePath=false", "ls-files", "--", spec],
     { timeout: TIMEOUT, maxBuffer: MAX_BUFFER });
   const files = stdout.split("\n").filter(Boolean);
   return { files: files.slice(0, n), truncated: files.length > n };

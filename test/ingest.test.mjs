@@ -39,8 +39,8 @@ test("ingest: 已登记 github remote → 落 github space + space.yaml 新 sche
   const card = cardOf(truth, "github__coldestlin__bossa");
   assert.match(card, /space_key: github__coldestlin__bossa/);
   assert.doesNotMatch(card, /^folder:/m);   // github session 不带 folder
-  assert.match(card, /\*\*用户\*\*：帮我加个功能/);   // 正文 = 全文 transcript
-  assert.match(card, /\*\*助手\*\*：好的，做完了/);
+  assert.match(card, /\*\*用户\*\*：\s*帮我加个功能/);   // 正文 = 全文 transcript（label 后换行，保 markdown 结构）
+  assert.match(card, /\*\*助手\*\*：\s*好的，做完了/);
 });
 
 test("ingest: 未登记 remote → 落 local__<person> + folder 标签", async () => {

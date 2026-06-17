@@ -1,6 +1,7 @@
 node_modules/
 truth/
 truth-server/
+web/fixtures/
 client.config.yaml
 tokens.yaml
 registry.yaml
