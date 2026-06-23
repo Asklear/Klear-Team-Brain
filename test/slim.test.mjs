@@ -18,9 +18,10 @@ const codexRaw = [
   JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: "已完成 etl 改造，结论 X" } }),
 ].join("\n");
 
-test("codex: 丢 token_count / 去重 exec_command_end", () => {
+test("codex: token_count 只留末条（统计用） / 去重 exec_command_end", () => {
   const slim = slimRaw(codexRaw);
-  assert.doesNotMatch(slim, /token_count/, "token_count 整条丢");
+  // token_count 每轮重发 → 只保留最后一条累计用量（给统计层），不再整丢
+  assert.equal(slim.split("\n").filter((l) => l.includes("token_count")).length, 1, "只留一条 token_count");
   assert.doesNotMatch(slim, /exec_command_end/, "exec_command_end 去重丢");
 });
 
@@ -88,4 +89,29 @@ test("cc: 结构保留 → parse 仍工作", () => {
   const s = parseSessionText(slimRaw(ccRaw), "claude-code");
   assert.match(s.intent, /改个 bug/);
   assert.equal(s.branch, "main");
+});
+
+// ---------- 上传前脱敏（密钥不进真相库）----------
+const secretRaw = [
+  JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text",
+    text: "我的 key 是 sk-ant-AAAA1111BBBB2222CCCC3333DDDD，别泄露" }] } }),
+  JSON.stringify({ type: "assistant", message: { role: "assistant", content: [
+    { type: "tool_use", name: "Bash", input: { command: "export OPENAI_API_KEY=plainsecretvalue123 && curl https://u:p4ssw0rdLong@api.x/y && echo ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" } },
+    { type: "text", text: "好的，已设置 password: hunter2longsecret" },
+  ] } }),
+].join("\n");
+
+test("redact: slimRaw 抹掉密钥/token，且不破坏 JSON 结构", () => {
+  const slim = slimRaw(secretRaw);
+  // 各类令牌被抹
+  assert.doesNotMatch(slim, /sk-ant-AAAA/, "OpenAI/Anthropic key 抹掉");
+  assert.doesNotMatch(slim, /ghp_ABCDEF/, "GitHub PAT 抹掉");
+  assert.doesNotMatch(slim, /plainsecretvalue123/, "赋值式 API_KEY 值抹掉");
+  assert.doesNotMatch(slim, /hunter2longsecret/, "password 值抹掉");
+  assert.doesNotMatch(slim, /p4ssw0rdLong/, "URL 内嵌口令抹掉");
+  assert.match(slim, /REDACTED/, "出现占位符");
+  // 键名/上下文保留（只换值）
+  assert.match(slim, /OPENAI_API_KEY/, "键名保留，便于读懂上下文");
+  // 每行仍是合法 JSON（赋值式只换右值、不吃键名）
+  for (const line of slim.split("\n")) if (line.trim()) JSON.parse(line);
 });

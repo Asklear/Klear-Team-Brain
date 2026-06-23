@@ -10,3 +10,8 @@ description = "样例配置里的占位/示例密钥（ghp_xxx、app_secret: xxx
 paths = [
   '''.*\.example\.yaml$''',
 ]
+# 脱敏单测里【故意埋】的假密钥——存在的意义就是验证 redact 能抹掉它（test/redact-existing、test/slim）。
+# 字面顺排字母+数字、一眼假；只放行这一个确切串，test/ 其余内容照常全扫，不放过真误提交。
+regexes = [
+  '''ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789''',
+]

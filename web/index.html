@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>team-brain · 真相层</title>
-<meta name="description" content="团队项目大脑的真相层 —— 浏览全队 session、飞书文档、代码状态与活动流。">
+<title>team-brain · truth layer</title>
+<meta name="description" content="The truth layer of the team project brain — browse the whole team's sessions, Feishu docs, code state and activity.">
 <meta name="theme-color" content="#fbfbf9">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23fbfbf9'/%3E%3Crect x='7.5' y='7.5' width='17' height='17' rx='4' fill='none' stroke='%2315803d' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%2315803d'/%3E%3C/svg%3E">
 <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -14,18 +14,19 @@
 </head>
 <body>
 <header class="topbar">
-  <button class="nav-toggle" id="nav-toggle" type="button" aria-label="菜单" aria-expanded="false">☰</button>
+  <button class="nav-toggle" id="nav-toggle" type="button" data-i18n-aria="nav.menu" aria-label="Menu" aria-expanded="false">☰</button>
   <a class="brand" href="#/">
     <span class="brand-mark" aria-hidden="true"></span>
     <span class="brand-name">team-brain</span>
-    <span class="brand-tag">真相层</span>
+    <span class="brand-tag" data-i18n="brand.tag">truth layer</span>
   </a>
   <form class="search" id="search-form" autocomplete="off">
-    <input id="search-input" type="search" placeholder="grep 全队真相库…  ( / 聚焦)" aria-label="搜索真相库">
+    <input id="search-input" type="search" data-i18n-ph="search.ph" data-i18n-aria="search.aria" placeholder="grep the team truth repo…  ( / to focus)" aria-label="Search the truth repo">
   </form>
-  <button class="token-chip" id="token-chip" type="button" title="连接 / 切换 token">
+  <button class="lang-toggle" id="lang-toggle" type="button" title="Language / 语言" data-i18n="lang.toggle">中文</button>
+  <button class="token-chip" id="token-chip" type="button" data-i18n-title="token.chipTitle" title="Connect / switch token">
     <span class="dot" id="token-dot"></span>
-    <span id="token-label">未连接</span>
+    <span id="token-label">Not connected</span>
   </button>
 </header>
 
@@ -33,14 +34,15 @@
 <div class="layout">
   <aside class="sidebar" id="sidebar">
     <nav class="nav">
-      <a href="#/" data-nav="/" class="nav-item">总览</a>
-      <a href="#/repos" data-nav="/repos" class="nav-item">仓库</a>
-      <a href="#/sessions" data-nav="/sessions" class="nav-item">会话</a>
-      <a href="#/docs" data-nav="/docs" class="nav-item">文档</a>
-      <a href="#/people" data-nav="/people" class="nav-item">人</a>
+      <a href="#/" data-nav="/" class="nav-item" data-i18n="nav.overview">Overview</a>
+      <a href="#/repos" data-nav="/repos" class="nav-item" data-i18n="nav.repos">Repos</a>
+      <a href="#/sessions" data-nav="/sessions" class="nav-item" data-i18n="nav.sessions">Sessions</a>
+      <a href="#/docs" data-nav="/docs" class="nav-item" data-i18n="nav.docs">Docs</a>
+      <a href="#/people" data-nav="/people" class="nav-item" data-i18n="nav.people">People</a>
+      <a href="#/stats" data-nav="/stats" class="nav-item" data-i18n="nav.stats">Stats</a>
     </nav>
     <div class="rail-section" id="spaces-rail">
-      <div class="rail-head">活跃仓库</div>
+      <div class="rail-head" data-i18n="rail.active">Active repos</div>
       <div class="rail-body" id="spaces-list"><div class="muted small pad">…</div></div>
     </div>
   </aside>
@@ -51,13 +53,13 @@
 <!-- token 连接弹层 -->
 <div class="modal-backdrop" id="token-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="token-title">
-    <h2 id="token-title">连接到真相库</h2>
-    <p class="muted small">粘贴你的个人 token（即 <code>client.config.yaml</code> 里那串，或管理员发你的）。仅存在本浏览器的 localStorage，只随请求发往真相库服务器。</p>
-    <input id="token-input" type="password" placeholder="粘贴 token…" spellcheck="false">
+    <h2 id="token-title" data-i18n="modal.title">Connect to the truth repo</h2>
+    <p class="muted small"><span data-i18n="modal.desc1">Paste your personal token (the string in </span><code>client.config.yaml</code><span data-i18n="modal.desc2">, or one your admin sent you). It lives only in this browser's localStorage and is sent only to the truth-repo server with each request.</span></p>
+    <input id="token-input" type="password" data-i18n-ph="token.inputPh" placeholder="Paste token…" spellcheck="false">
     <div id="token-err" class="token-err" hidden></div>
     <div class="modal-actions">
-      <button class="btn-ghost" id="token-clear" type="button">断开</button>
-      <button class="btn" id="token-save" type="button">连接</button>
+      <button class="btn-ghost" id="token-clear" type="button" data-i18n="btn.disconnect">Disconnect</button>
+      <button class="btn" id="token-save" type="button" data-i18n="btn.connect">Connect</button>
     </div>
   </div>
 </div>

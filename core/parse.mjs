@@ -10,6 +10,11 @@ export function textOf(o) {
   return "";
 }
 
+// token 用量统计：CC 逐条 assistant.message.usage 累加；Codex 取 token_count 的累计值（total_token_usage）。
+// 口径统一成四元组（与卡片 frontmatter tokens_* 一一对应），tokens_total = in+out+cache_r+cache_w：
+//   in = 新输入(非缓存) · out = 输出 · cache_r = 缓存命中读 · cache_w = 缓存写入(CC 才有，Codex 记 0)。
+const emptyUsage = () => ({ in: 0, out: 0, cache_r: 0, cache_w: 0 });
+
 // 嗅探格式：Codex 头一行是 session_meta；否则按 Claude Code。
 export function detectTool(content) {
   for (const line of content.split("\n")) {
@@ -34,6 +39,7 @@ export function parseSessionText(content, tool) {
 function parseClaudeText(content) {
   let intent = null, branch = null, cwd = null, ts = null, updated = null, turns = 0;
   const tail = [];
+  const usage = emptyUsage(); let sawUsage = false;     // CC：每条 assistant 消息一份 usage，累加得 session 总量
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     let o;
@@ -43,14 +49,24 @@ function parseClaudeText(content) {
     if (!branch && o.gitBranch) branch = o.gitBranch;
     ts ??= o.timestamp;                 // 首条 = 创建时间
     if (o.timestamp) updated = o.timestamp;   // 末条 = 最后活跃时间（长 session 续写后比 ts 新很多）
-    if (o.type === "assistant") { turns++; const t = textOf(o); if (t) tail.push(t); }
+    if (o.type === "assistant") {
+      turns++; const t = textOf(o); if (t) tail.push(t);
+      const u = o.message?.usage;
+      if (u) {
+        sawUsage = true;
+        usage.in += u.input_tokens || 0;
+        usage.out += u.output_tokens || 0;
+        usage.cache_w += u.cache_creation_input_tokens || 0;
+        usage.cache_r += u.cache_read_input_tokens || 0;
+      }
+    }
     if (o.type === "user" && intent === null) {
       const t = textOf(o);
       if (t && !t.startsWith("<")) intent = t.replace(/\s+/g, " ").trim().slice(0, 120);
     }
   }
   const conclusion = tail.slice(-2).join(" ").replace(/\s+/g, " ").trim().slice(0, 1500);
-  return { intent, branch, cwd, ts, updated: updated || ts, turns, conclusion };
+  return { intent, branch, cwd, ts, updated: updated || ts, turns, conclusion, usage: sawUsage ? usage : null };
 }
 
 // Codex rollout：取 response_item/message 的纯文本（input_text/output_text/text）
@@ -73,6 +89,7 @@ function parseCodexText(content) {
   let branch = null, repoUrl = null;          // session 时刻真实分支 / origin remote（原文 payload.git）
   let evUser = null, riUser = null;          // 第一句人类开场：事件级 / 原始级
   const agentTail = [], riTail = [];          // 结论：agent_message / 回退 assistant
+  let usage = null;                           // token 用量：取 token_count 的累计值（最后一条为准，slim 已只留末条）
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
@@ -92,6 +109,13 @@ function parseCodexText(content) {
       } else if (p?.type === "agent_message") {
         turns++;
         if (p.message) agentTail.push(p.message);
+      } else if (p?.type === "token_count") {
+        // total_token_usage 是 session 累计；input_tokens 含 cached → 拆出新输入。Codex 无 cache 写入概念，cache_w=0。
+        const tot = p.info?.total_token_usage || p.info?.last_token_usage || p.info;
+        if (tot && (tot.input_tokens != null || tot.output_tokens != null)) {
+          const cr = tot.cached_input_tokens || 0;
+          usage = { in: Math.max(0, (tot.input_tokens || 0) - cr), out: tot.output_tokens || 0, cache_r: cr, cache_w: 0 };
+        }
       }
     } else if (o.type === "response_item" && p?.type === "message") {
       const t = codexText(p);
@@ -104,7 +128,7 @@ function parseCodexText(content) {
   const intent = (evUser || riUser || "").replace(/\s+/g, " ").trim().slice(0, 120) || null;
   const tail = agentTail.length ? agentTail : riTail;
   const conclusion = tail.slice(-2).join(" ").replace(/\s+/g, " ").trim().slice(0, 1500);
-  return { intent, branch, repoUrl, cwd, ts, updated: updated || ts, turns: turns || riTail.length, conclusion, subagent };
+  return { intent, branch, repoUrl, cwd, ts, updated: updated || ts, turns: turns || riTail.length, conclusion, subagent, usage };
 }
 
 function parseSessionHistoryMdText(content) {

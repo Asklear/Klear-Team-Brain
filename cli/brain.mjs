@@ -109,7 +109,7 @@ function addCodexMcp() {
 }
 
 // 写 client.config.yaml（setup 与 join 共用同一份模板）
-function writeConfig({ server, token, id, name, folders = [], consumer = false }) {
+function writeConfig({ server, token, id, name, folders = [], consumer = false, collectAll = false }) {
   writeFileSync(CFG,
     `# 客户端配置（含 token，已 gitignore）。改了跑 brain service restart。\n` +
     `server_url: ${server}\n` +
@@ -117,6 +117,8 @@ function writeConfig({ server, token, id, name, folders = [], consumer = false }
     `me:\n  id: ${id}\n  name: ${name}\n\n` +
     (consumer
       ? `# 纯消费者：不采集本机，只用来问大脑\nupload_folders: []\n`
+      : collectAll
+      ? `# 未指定工作空间 → 采集本机所有 session（含全部项目）。要收窄改 upload_folders。\ncollect_all: true\nupload_folders: []\n`
       : `upload_folders:\n${folders.map((f) => `  - ${f}`).join("\n")}\n`) +
     `exclude: []\n\n` +
     `docs: true\ncodex: true\nagentdocs: true\ninterval_sec: 60\ndebounce_sec: 60\n`);
@@ -162,25 +164,18 @@ async function setup() {
   const id = await ask("你的 id（要和 team.yaml 一致，必填）");
   if (!id) { rl.close(); die("id 必填"); }
   const name = await ask("你的名字", id);
-  const foldersRaw = await ask("要采集的工作空间（多个用逗号分隔，必填）");
+  const foldersRaw = await ask("要采集的工作空间（多个用逗号分隔，留空=采集本机所有 session）");
   const folders = foldersRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  if (!folders.length) { rl.close(); die("至少给一个工作空间"); }
-  for (const f of folders) if (!existsSync(f)) console.log(c.warn(`  ⚠ ${f} 现在不存在，先写进去，回头建了即可`));
+  let collectAll = false;
+  if (!folders.length) {
+    collectAll = true;
+    console.log(c.warn(`⚠️ 没指定工作空间 → 默认采集本机所有 session（含全部项目，队友都能看到原文）。要收窄回头改 upload_folders。`));
+  } else {
+    for (const f of folders) if (!existsSync(f)) console.log(c.warn(`  ⚠ ${f} 现在不存在，先写进去，回头建了即可`));
+  }
   rl.close();
 
-  const yaml =
-    `# 客户端配置（含 token，已在 .gitignore，别提交）。改了跑 brain service restart。\n` +
-    `server_url: ${server}\n` +
-    `token: "${token}"\n` +
-    `me:\n  id: ${id}\n  name: ${name}\n\n` +
-    `upload_folders:\n${folders.map((f) => `  - ${f}`).join("\n")}\n` +
-    `exclude: []         # 不传的子目录（upload_folders 里要排除的）\n\n` +
-    `docs: true          # 同步选中工作空间里的 .md\n` +
-    `codex: true         # 也采集 ~/.codex/sessions（用 Codex 干活的）\n` +
-    `agentdocs: true     # 收共享 agentdoc（CLAUDE.md / AGENTS.md）\n` +
-    `interval_sec: 60\n` +
-    `debounce_sec: 60\n`;
-  writeFileSync(CFG, yaml);
+  writeConfig({ server, token, id, name, folders, collectAll });
   console.log(c.ok(`\n✓ 写好 ${CFG}`));
 
   addMcp();                                           // 接 MCP（问 Agent 那条）：Claude Code + Codex，含「没接上怎么补 / 别的工具怎么接」
@@ -197,7 +192,7 @@ function start(once) {
 }
 
 // ---------------- update（从服务器拉最新客户端代码 + 重启常驻）----------------
-// 服务器的 /client.tgz 只含代码（core/client/mcp/cli + package*），不含 client.config.yaml/状态，
+// 服务器的 /client.tgz 只含代码（core/client/mcp/cli + 精简 package.json，无 lark），不含 client.config.yaml/状态，
 // 所以解压覆盖到 ROOT 不会动你的 token/配置/已上传记录。比重跑 curl|bash 干净：不重做 MCP/PATH 那些一次性步骤。
 function update() {
   // 安全闸：ROOT 是 git 仓 = 开发 checkout（不是 ~/.team-brain 装机目录）→ 解压会覆盖你的源码改动，拦住。
@@ -213,7 +208,11 @@ function update() {
   if (sh("tar", ["xzf", tmp, "-C", ROOT]).status !== 0) { try { unlinkSync(tmp); } catch {} die("解压失败"); }
   try { unlinkSync(tmp); } catch {}
   console.log(c.dim("更新依赖…"));
+  // 旧版装机包带过 lark 全树的 package-lock.json → 删掉它再装，否则 npm 会照旧 lock 把 lark 装回来；
+  // 装完 prune 掉 node_modules 里残留的 lark（已不在精简 package.json 里），把客户端瘦下来。
+  try { unlinkSync(join(ROOT, "package-lock.json")); } catch {}
   sh("npm", ["install", "--silent", "--omit=dev"], { cwd: ROOT });
+  sh("npm", ["prune", "--silent", "--omit=dev"], { cwd: ROOT });
   sh("chmod", ["+x", join(ROOT, "cli", "brain.mjs")]);
   console.log(c.ok("✓ 客户端代码已更新"));
   // 重启常驻让 sync 用上新代码（没装常驻就提示怎么起）
@@ -243,23 +242,30 @@ async function joinCmd(code) {
   const gitName = sh("git", ["config", "user.name"]).stdout?.trim();
   if (gitName) console.log(c.dim(`→ 本机 git 名 "${gitName}"（大脑里作者显示不对就找管理员加进你的 git_names）`));
 
-  // 3. upload_folders（纯消费者跳过）
-  let folders = [];
+  // 3. upload_folders（纯消费者跳过）。没填任何工作空间 → 默认采集本机所有 session（collect_all）
+  let folders = [], collectAll = false;
   if (!consume) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const sugg = detectFolders();
     if (sugg.length) console.log(c.dim(`检测到你常在这些仓干活：\n  ${sugg.join("\n  ")}`));
-    const raw = (await rl.question(`要采集的工作空间（逗号分隔${sugg.length ? "，回车=全选上面" : ""}）: `)).trim();
+    const raw = (await rl.question(`要采集的工作空间（逗号分隔${sugg.length ? "，回车=全选上面" : "，留空=采集本机所有 session"}）: `)).trim();
     folders = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : sugg;
-    if (!folders.length) { rl.close(); die("至少给一个工作空间（纯消费请加 --consume-only）"); }
-    console.log(c.warn(`⚠️ 放进去 = 队友能看到这些文件夹 session 的原文。含密钥/客户数据的别放。`));
-    const ok = (await rl.question(`确认上面 ${folders.length} 个？(Y/n): `)).trim().toLowerCase();
-    rl.close();
-    if (ok === "n") die("已取消，重跑 brain join 再选");
+    if (!folders.length) {
+      console.log(c.warn(`⚠️ 没指定工作空间 → 默认采集本机所有 session（含全部项目，队友都能看到原文）。含密钥/客户数据的项目请改填具体工作空间，或加 --consume-only 只问不传。`));
+      const ok = (await rl.question(`确认采集本机全部 session？(Y/n): `)).trim().toLowerCase();
+      rl.close();
+      if (ok === "n") die("已取消，重跑 brain join 指定工作空间");
+      collectAll = true;
+    } else {
+      console.log(c.warn(`⚠️ 放进去 = 队友能看到这些文件夹 session 的原文。含密钥/客户数据的别放。`));
+      const ok = (await rl.question(`确认上面 ${folders.length} 个？(Y/n): `)).trim().toLowerCase();
+      rl.close();
+      if (ok === "n") die("已取消，重跑 brain join 再选");
+    }
   }
 
   // 4. 写配置 → 接 MCP → 首次回填 → 装常驻
-  writeConfig({ server: srv, token, id, name, folders, consumer: consume });
+  writeConfig({ server: srv, token, id, name, folders, consumer: consume, collectAll });
   console.log(c.ok(`✓ 配置写好 ${CFG}`));
   const mcpAttached = addMcp();
   console.log(c.dim("→ 首次回填历史 session（跨境可能要一会，别关）…"));
@@ -282,7 +288,9 @@ function adminCmd(sub, rest) {
   else if (sub === "rm" || sub === "remove") rargs = ["remove", ...rest];
   else if (sub === "org") rargs = ["org", ...rest];     // org add <name> | org rm <name> | org list
   else if (sub === "repo") rargs = ["repo", ...rest];   // repo add <owner/repo> | repo rm <owner/repo> | repo list
-  else die("用法：brain admin add|who|rm|org|repo …（org/repo 管 registry 登记的 GitHub 空间）");
+  else if (sub === "gitlab") rargs = ["gitlab", ...rest];  // gitlab instance|group|project add|rm|list …
+  else if (sub === "gitea") rargs = ["gitea", ...rest];    // gitea instance|org|repo add|rm|list …
+  else die("用法：brain admin add|who|rm|org|repo|gitlab|gitea …（org/repo/gitlab/gitea 管 registry 登记的团队空间）");
   const remote = `cd ${shq(a.dir)} && node server/admin.mjs ${rargs.map(shq).join(" ")}`;
   const r = spawnSync("ssh", [a.ssh, remote], { stdio: "inherit" });
   process.exit(r.status ?? 0);
@@ -462,12 +470,17 @@ const HELP = `brain —— 团队大脑客户端
   brain stop                  停常驻（不卸）
   brain uninstall [--purge]   完整卸载（停常驻+摘MCP+删token配置；--purge 连命令和安装目录）
   brain status                看状态
+  brain version               看客户端版本
   brain logs [-f]             看日志
   brain admin add <id> --name <显示名> [--email][--git-name][--consumer]   （管理员）加人，吐邀请码
   brain admin who             （管理员）看花名册
   brain admin rm <id>         （管理员）撤销某人访问
   brain admin org add|rm|list <org> [--pat <PAT>]          （管理员）登记 GitHub org（一把 PAT 覆盖其全部 repo）
-  brain admin repo add|rm|list <owner/repo> [--pat <PAT>]  （管理员）登记单个 GitHub repo（每仓一把 PAT）`;
+  brain admin repo add|rm|list <owner/repo> [--pat <PAT>]  （管理员）登记单个 GitHub repo（每仓一把 PAT）
+  brain admin gitlab instance add <host> [--base-url <url>] [--token <t>]   （管理员）登记 GitLab 自建实例
+  brain admin gitlab group|project add|rm|list <host> <名/owner/repo> [--token]  （管理员）登记 GitLab group/project
+  brain admin gitea  instance add <host> [--base-url <url>] [--token <t>]   （管理员）登记 Gitea 自建实例
+  brain admin gitea  org|repo add|rm|list <host> <名/owner/repo> [--token]      （管理员）登记 Gitea org/repo`;
 try {
   switch (cmd) {
     case "join": await joinCmd(sub); break;
@@ -488,6 +501,7 @@ try {
     case "stop": serviceStop(); break;
     case "status": case undefined: status(); break;
     case "logs": logs(flag("-f") || flag("--follow")); break;
+    case "version": case "-v": case "--version": console.log(`brain ${CLIENT_VERSION}`); break;
     case "help": case "-h": case "--help": console.log(HELP); break;
     default: die(`未知命令 ${cmd}\n\n${HELP}`);
   }

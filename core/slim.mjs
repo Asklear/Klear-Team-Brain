@@ -6,6 +6,10 @@
 //
 // 实测背景：单条 316MB（多为内联截图 base64）/ 125MB（海量中等 tool 输出）会撑爆小内存服务器。
 
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
+import { redactJsonl } from "./redact.mjs";
+
 const KB = 1024;
 // 图片/裸 base64 大块：文本级先剥（不必 JSON.parse 巨行，省内存；也顺带清掉 reasoning 的 encrypted blob）
 const IMG_DATAURI = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/g;
@@ -30,8 +34,9 @@ function capDeep(v, head, tail) {
 }
 
 // ---- Codex ----
+// token_count 不在这丢：它每轮重发（噪声）但带 session 累计 token 用量（统计要用）→
+// slimRaw 单独处理：丢掉中间所有重复，只留【最后一条】累计（见下）。
 const CODEX_DROP_EVENT = new Set([
-  "token_count",                 // 纯限流计数遥测
   "exec_command_end",            // 与 response_item/function_call_output 重复（同命令输出存两遍）
   "exec_command_output_delta",   // 流式增量块，重复
 ]);
@@ -88,18 +93,43 @@ function slimCC(o) {
   return o;
 }
 
-// raw jsonl 文本 → 蒸馏后的 jsonl 文本。
-export function slimRaw(raw) {
-  const text = String(raw || "")
+// 单行蒸馏：图片/base64 文本级先剥（不必 JSON.parse 巨行）→ 按记录类型做减法。
+// out 收蒸馏后行；state.lastTokenCount 跨行累计（Codex token_count 每轮重发，只留末条）。
+// 拆出来让整文本(slimRaw)和流式逐行(slimRawFile)共用同一套减法，逐行处理与整文处理等价
+//（JSONL 单条记录不跨行，IMG/B64 strip 按行做结果一致）。
+function feedLine(line, out, state) {
+  if (!line || !line.trim()) return;
+  const stripped = line
     .replace(IMG_DATAURI, (m) => `[image ${human(m.length)} omitted]`)
     .replace(B64_RUN, (m) => `[blob ${human(m.length)} omitted]`);
-  const out = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let o; try { o = JSON.parse(line); } catch { out.push(capStr(line, ARG_HEAD, ARG_TAIL)); continue; } // 坏行也别无限长
-    const r = (o && typeof o === "object" && o.payload && typeof o.payload === "object") ? slimCodex(o) : slimCC(o);
-    if (r === null) continue;                 // 整条丢
-    out.push(JSON.stringify(r));
-  }
-  return out.join("\n") + "\n";
+  let o; try { o = JSON.parse(stripped); } catch { out.push(capStr(stripped, ARG_HEAD, ARG_TAIL)); return; } // 坏行也别无限长
+  const isCodex = o && typeof o === "object" && o.payload && typeof o.payload === "object";
+  if (isCodex && o.type === "event_msg" && o.payload.type === "token_count") { state.lastTokenCount = o; return; }
+  const r = isCodex ? slimCodex(o) : slimCC(o);
+  if (r === null) return;                     // 整条丢
+  out.push(JSON.stringify(r));
+}
+
+function finish(out, state) {
+  if (state.lastTokenCount) out.push(JSON.stringify(state.lastTokenCount)); // 末尾补回累计用量（一条、极小；位置不影响 transcript）
+  // 上传前最后一步：抹密钥/token（保 JSON 结构）→ 真相库 .jsonl 不含密钥，完整原文留本机。
+  return redactJsonl(out.join("\n")) + "\n";
+}
+
+// raw jsonl 文本 → 蒸馏后的 jsonl 文本。
+export function slimRaw(raw) {
+  const out = [], state = { lastTokenCount: null };
+  for (const line of String(raw || "").split("\n")) feedLine(line, out, state);
+  return finish(out, state);
+}
+
+// 流式版：逐行读文件、单行蒸馏，永不把整文件持有成一个超大字符串
+//（codex rollout 可达数百 MB，readFileSync(utf8) 会撞 V8 ~512MB 串上限/OOM；
+//  蒸馏后通常只剩几 MB，瓶颈只在"先整读"这一步——流式绕开它）。
+// 注意：单条 JSONL 记录仍逐行读成字符串，极端单行超大(>几百MB)仍可能吃内存，但 rollout 是每事件一行、单行有界。
+export async function slimRawFile(file) {
+  const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
+  const out = [], state = { lastTokenCount: null };
+  try { for await (const line of rl) feedLine(line, out, state); } finally { rl.close(); }
+  return finish(out, state);
 }

@@ -11,19 +11,24 @@ import { createHash } from "node:crypto";
 import { parse } from "yaml";
 import { parseSession, parseSessionText } from "../core/parse.mjs";
 import { coordOf, expandHome, gitBranch, parseRemote } from "../core/coord.mjs";
-import { slimRaw } from "../core/slim.mjs";
+import { slimRaw, slimRawFile } from "../core/slim.mjs";
 import { log } from "../core/log.mjs";
-import { CLIENT_VERSION } from "../core/version.mjs";
+import { CLIENT_VERSION, PIPELINE_VERSION } from "../core/version.mjs";
 
 const MAX_UPLOAD = 80 * 1024 * 1024;   // 蒸馏后仍超此值 → 跳过+标 seen。放到 80MB：超活跃 session（数千次
                                        // 工具调用，截后仍叠到几十 MB，实测 125MB→58MB）也能过；gzip 后才十几 MB，服务端扛得住
 const MAX_RAW = 400 * 1024 * 1024;     // 原文超此值连读都不读（防极端大文件冻住采集；并安全低于 V8 ~512MB 字符串上限，
-                                       // 否则 readFileSync(utf8) 会每轮直接抛"string too long"）
+                                       // 否则 readFileSync(utf8) 会每轮直接抛"string too long"）。用于一次整读的路径：CC ingest / session-history。
+const MAX_RAW_CODEX = 4 * 1024 * 1024 * 1024;  // Codex 走流式逐行蒸馏(slimRawFile)，不整读 → 不受 V8 串上限约束；
+                                       // 这只是个防失控大文件冻住采集的兜底（4GB），实测几百 MB 的 rollout 蒸馏后仅几 MB。
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const cfg = parse(readFileSync(join(ROOT, "client.config.yaml"), "utf8"));
 cfg.upload_folders = (cfg.upload_folders || []).map(expandHome);
 cfg.exclude = (cfg.exclude || []).map(expandHome);
+// 没指定工作空间且开了 collect_all → 不按 folder 闸门，采集本机所有 session（安装时未填采集位置的默认）。
+// 注意：只放开 session 闸门；session_history 本地 .md 仍只从 upload_folders 白名单扫描（见 AGENTS.md 不变量）。
+const COLLECT_ALL = !!cfg.collect_all;
 const CC_ROOT = join(homedir(), ".claude", "projects");
 const CODEX_ROOT = join(homedir(), ".codex", "sessions");
 const SESSION_HISTORY_DIR = "session_history";
@@ -35,6 +40,7 @@ const seenSession = new Map(); // file -> mtimeMs 已上传
 
 // 已上传记录落盘 / 复原（A：重启后跳过历史，不再把 49 个 session 全重传）
 let prevFoldersStr = "";                                  // 上次运行时的 upload_folders（检测范围变化用）
+let prevPipeline = 0;                                     // 上次运行时的采集流水线代次（检测升级、触发一次性重收）
 const foldersStr = () => JSON.stringify((cfg.upload_folders || []).slice().sort());
 
 function loadState() {
@@ -42,7 +48,21 @@ function loadState() {
     const s = JSON.parse(readFileSync(STATE, "utf8"));
     for (const [k, v] of Object.entries(s.session || {})) seenSession.set(k, v);
     prevFoldersStr = s.folders || "";
+    prevPipeline = Number(s.pipeline) || 0;              // 缺字段（升级前的老 state）→ 0，必触发回填
   } catch {}
+}
+
+// 流水线升级 → 一次性重收受影响的历史（与"范围变了清 seen"同一套路）。
+// 当前唯一场景（代次 2）：slim 之前整丢 Codex token_count → 重收 Codex 历史，用新 slim 重新蒸馏、补回 token 用量。
+// 只清【Codex】的 seen（本机原文还在 ~/.codex）→ 重传量最小；CC 历史的 token 在服务端 rebuild-cards 补，不必重传。
+function reconcilePipeline() {
+  if (prevPipeline >= PIPELINE_VERSION) return;
+  let cleared = 0;
+  for (const file of [...seenSession.keys()]) {
+    if (file.startsWith(CODEX_ROOT)) { seenSession.delete(file); cleared++; }
+  }
+  if (cleared) log.info("[流水线升级] 采集代次提升 → 重收 Codex 历史（补 token 用量）", { from: prevPipeline, to: PIPELINE_VERSION, codex_resync: cleared });
+  prevPipeline = PIPELINE_VERSION;
 }
 
 // 范围变了（upload_folders 增/改）→ 清掉 seen，让这轮把"现在范围内"的所有历史重扫补传。
@@ -60,6 +80,7 @@ function saveState() {
     writeFileSync(STATE, JSON.stringify({
       session: Object.fromEntries(seenSession),
       folders: foldersStr(),                             // 记下本次范围，下次启动比对
+      pipeline: PIPELINE_VERSION,                        // 记下本次流水线代次，下次启动比对（升级则一次性重收）
     }));
   } catch (e) { log.warn("state 落盘失败", { err: e.message }); }
 }
@@ -74,7 +95,7 @@ async function pool(items, n, worker) {
 const within = (p, f) => p === f || p.startsWith(f.endsWith("/") ? f : f + "/");
 const excluded = (p) => (cfg.exclude || []).some((e) => within(p, e)); // 在某个 exclude 子树下
 const gated = (cwd) =>
-  !!cwd && !excluded(cwd) && (cfg.upload_folders || []).some((f) => within(cwd, f));
+  !!cwd && !excluded(cwd) && (COLLECT_ALL || (cfg.upload_folders || []).some((f) => within(cwd, f)));
 
 async function post(path, payload, tries = 3) {
   const json = JSON.stringify(payload);
@@ -163,22 +184,21 @@ async function syncCodexSessions() {
     const m = st.mtimeMs;
     if (Date.now() - m < DEBOUNCE) continue;            // 还在活跃，等稳定
     if (seenSession.get(file) === m) continue;            // 没变
-    if (st.size > MAX_RAW) { log.warn("codex 跳过：原文超读前上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; continue; }
-    let raw; try { raw = readFileSync(file, "utf8"); } catch (e) { log.warn("codex 读取失败", { file: basename(file), err: e.message }); continue; }
-    const s = parseSessionText(raw, "codex");
-    // 没人类开场 / 不在闸门内 / guardian-子代理噪声 → 跳过
-    if (!s.intent || s.subagent || !gated(s.cwd)) { skip++; seenSession.set(file, m); continue; }
-    jobs.push({ file, m, s, raw });
+    if (st.size > MAX_RAW_CODEX) { log.warn("codex 跳过：原文超采集上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; continue; }
+    jobs.push({ file, m });                              // 读/蒸馏/判闸门都挪进 worker：流式逐行，不再整文件读成大字符串
   }
-  await pool(jobs, CONC, async ({ file, m, s, raw }) => {
+  await pool(jobs, CONC, async ({ file, m }) => {
     const id = basename(file).replace(/\.jsonl$/, "");   // rollout-<ts>-<uuid>，唯一
     try {
+      const slim = await slimRawFile(file);              // 流式蒸馏：逐行读 → 剥图片/截巨型输出，完整原文留本机；几百 MB 也不撞 V8 串上限
+      const s = parseSessionText(slim, "codex");          // 用蒸馏后文本判闸门/取坐标（messages + session_meta.git 都保留）
+      // 没人类开场 / 不在闸门内 / guardian-子代理噪声 → 跳过
+      if (!s.intent || s.subagent || !gated(s.cwd)) { skip++; seenSession.set(file, m); return; }
       const c = coordOf(s.cwd, cfg.upload_folders);   // 只算 remote + folder；github-vs-local 由服务器定
       // remote/branch 优先用原文 session_meta.git 记的（session 时刻、可靠）；
       // 没记（旧 rollout）才回退到现场 git：remote 按 cwd 现取 origin、branch 按 cwd 现取当前分支。
       const remote = c.remote || parseRemote(s.repoUrl);
       const branch = s.branch || gitBranch(s.cwd);
-      const slim = slimRaw(raw);                         // 上传前瘦身：剥图片/截巨型输出，完整原文留本机
       if (slim.length > MAX_UPLOAD) { log.warn("codex 跳过：瘦身后仍超上限", { id, mb: +(slim.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; return; }
       const r = await post("/ingest", {
         id, tool: "codex", raw: slim,
@@ -317,6 +337,7 @@ const once = process.argv.includes("--once");
 if (!once) acquireLock();                               // 持久模式先抢锁，第二个常驻会在此退出
 loadState();                                            // 先复原已上传记录，首轮就跳过历史
 reconcileScope();                                       // 范围变了就清 seen、补全新范围历史
-log.info("sync 启动", { server: cfg.server_url, folders: (cfg.upload_folders || []).length, conc: CONC, seen: seenSession.size, ver: CLIENT_VERSION, once });
+reconcilePipeline();                                    // 流水线升级了就重收受影响历史（当前：Codex token 用量）
+log.info("sync 启动", { server: cfg.server_url, folders: (cfg.upload_folders || []).length, collect_all: COLLECT_ALL, conc: CONC, seen: seenSession.size, ver: CLIENT_VERSION, once });
 await safeTick();
 if (!once) setInterval(safeTick, (cfg.interval_sec ?? 60) * 1000);

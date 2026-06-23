@@ -9,3 +9,9 @@ const PKG = join(dirname(dirname(fileURLToPath(import.meta.url))), "package.json
 let v = "unknown";
 try { v = JSON.parse(readFileSync(PKG, "utf8")).version || "unknown"; } catch {}
 export const CLIENT_VERSION = v;
+
+// 采集流水线代次：影响【从 raw 抽出什么】的不向后兼容改动 +1。
+// 客户端把它存进 .brain-state.json；升级后若发现存档代次更低，会一次性重收受影响的历史（见 sync.mjs reconcilePipeline）。
+//   1 → 初代。
+//   2 → slim 保留 Codex token_count（之前整丢）→ 重收 Codex 历史以补回 token 用量统计。
+export const PIPELINE_VERSION = 2;

@@ -74,10 +74,10 @@ function remove(o) {
   console.log(`✓ 已撤销 ${id} 的访问（历史数据保留）${ok ? "，服务器已重启" : ""}`);
 }
 
-// ---- registry：登记的 GitHub org/repo（决定有哪些 github space）----
+// ---- registry：登记的代码托管 org/repo（决定有哪些团队 space）。github 顶层；gitlab/gitea 按实例 ----
 const loadReg = () => (existsSync(REGISTRY) ? (parse(readFileSync(REGISTRY, "utf8")) || {}) : {});
 const saveReg = (r) => writeFileSync(REGISTRY,
-  `# registry —— 登记的 GitHub org/repo（决定有哪些 github space）。由 brain admin org/repo 维护。\n` + stringify(r));
+  `# registry —— 登记的 github org/repo + gitlab/gitea 实例（决定有哪些团队 space）。由 brain admin 维护。\n` + stringify(r));
 const normReg = (r) => { r.github = r.github || {}; r.github.orgs = r.github.orgs || []; r.github.repos = r.github.repos || []; return r; };
 const orgNames = (r) => r.github.orgs.map((o) => (typeof o === "string" ? o : o?.org));
 const repoKeys = (r) => r.github.repos.map((x) => (typeof x === "string" ? x : `${x.owner}/${x.repo}`));
@@ -113,6 +113,65 @@ function regRepo(o) {
   } else fail("用法：admin repo add|rm|list <owner/repo>");
 }
 
+// ---- gitlab / gitea：自建可多实例。每实例 host + base_url + token，下挂 scope（group/org）与单仓（project/repo）----
+const PROV = {
+  gitlab: { scope: "groups", repo: "projects", scopeName: "group", repoName: "project", scopeKey: "group" },
+  gitea: { scope: "orgs", repo: "repos", scopeName: "org", repoName: "repo", scopeKey: "org" },
+};
+const normProv = (r, provider) => { r[provider] = r[provider] || {}; r[provider].instances = r[provider].instances || []; return r; };
+const findInst = (r, provider, host) => (r[provider].instances).find((i) => (i.host || "").toLowerCase() === host.toLowerCase());
+const scopeNameOf = (m, x) => (typeof x === "string" ? x : (x?.[m.scopeKey]));
+const repoKeyOf = (x) => (typeof x === "string" ? x : (x?.owner && x?.repo ? `${x.owner}/${x.repo}` : ""));
+
+function providerCmd(provider, o) {
+  const m = PROV[provider];
+  const r = normProv(normReg(loadReg()), provider);
+  const action = o._.shift();
+
+  if (action === "instance") {
+    const sub = o._.shift(), host = o._[0];
+    if (sub === "list") return void console.log(r[provider].instances.map((i) => `${i.host}${i.base_url ? ` (${i.base_url})` : ""}${i.token ? " [token]" : ""}`).join("\n") || "（无实例）");
+    if (!host) fail(`用法：admin ${provider} instance add|rm|list <host> [--base-url <url>] [--token <t>]`);
+    if (sub === "add") {
+      let inst = findInst(r, provider, host);
+      if (!inst) { inst = { host }; r[provider].instances.push(inst); }
+      if (o["base-url"]) inst.base_url = o["base-url"];
+      if (o.token) inst.token = o.token;
+      saveReg(r);
+      console.log(`✓ 实例 ${host}${o["base-url"] ? `（base_url=${o["base-url"]}）` : ""}${o.token ? "（带 token）" : ""}${restart() ? "，服务器已重启" : ""}`);
+    } else if (sub === "rm" || sub === "remove") {
+      r[provider].instances = r[provider].instances.filter((i) => (i.host || "").toLowerCase() !== host.toLowerCase()); saveReg(r);
+      console.log(`✓ 已移除实例 ${host}${restart() ? "，服务器已重启" : ""}（已建的 space 不会自动删）`);
+    } else fail(`用法：admin ${provider} instance add|rm|list <host>`);
+    return;
+  }
+
+  const isScope = action === m.scopeName, isRepo = action === m.repoName;
+  if (!isScope && !isRepo) fail(`用法：admin ${provider} instance|${m.scopeName}|${m.repoName} …`);
+  const listKey = isScope ? m.scope : m.repo;
+  const sub = o._.shift(), host = o._[0], name = o._[1];
+  if (!host) fail(`用法：admin ${provider} ${action} add|rm|list <host> [<${isScope ? "name" : "owner/repo"}>]`);
+  let inst = findInst(r, provider, host);
+
+  if (sub === "list") return void console.log((inst?.[listKey] || []).map((x) => isScope ? scopeNameOf(m, x) : repoKeyOf(x)).join("\n") || "（无）");
+  if (!name) fail(`用法：admin ${provider} ${action} add|rm <host> <${isScope ? "name" : "owner/repo"}>`);
+  if (isRepo && !/^[a-z0-9_./-]+\/[a-z0-9_.-]+$/i.test(name)) fail("owner/repo 形如 group/sub/proj 或 owner/repo");
+  if (!inst) { if (sub !== "add") fail(`实例 ${host} 未登记（先 admin ${provider} instance add ${host}）`); inst = { host }; r[provider].instances.push(inst); }
+  inst[listKey] = inst[listKey] || [];
+
+  const has = (x) => isScope ? scopeNameOf(m, x) === name : repoKeyOf(x) === name;
+  if (sub === "add") {
+    if (inst[listKey].some(has)) fail(`${action} "${name}" 已登记`);
+    if (isScope) inst[listKey].push({ [m.scopeKey]: name, ...(o.token ? { token: o.token } : {}) });
+    else { const i = name.lastIndexOf("/"); inst[listKey].push({ owner: name.slice(0, i), repo: name.slice(i + 1), ...(o.token ? { token: o.token } : {}) }); }
+    saveReg(r);
+    console.log(`✓ 已登记 ${provider} ${action} ${host}/${name}${o.token ? "（带 token）" : "（用实例级 token）"}${restart() ? "，服务器已重启" : ""}`);
+  } else if (sub === "rm" || sub === "remove") {
+    inst[listKey] = inst[listKey].filter((x) => !has(x)); saveReg(r);
+    console.log(`✓ 已移除 ${provider} ${action} ${host}/${name}${restart() ? "，服务器已重启" : ""}`);
+  } else fail(`用法：admin ${provider} ${action} add|rm|list <host> <${isScope ? "name" : "owner/repo"}>`);
+}
+
 const o = parseArgs(process.argv.slice(2));
 const cmd = o._.shift();
 if (cmd === "add") add(o);
@@ -120,4 +179,6 @@ else if (cmd === "list") list();
 else if (cmd === "remove" || cmd === "rm") remove(o);
 else if (cmd === "org") regOrg(o);
 else if (cmd === "repo") regRepo(o);
-else fail("用法：admin add|list|remove|org|repo …");
+else if (cmd === "gitlab") providerCmd("gitlab", o);
+else if (cmd === "gitea") providerCmd("gitea", o);
+else fail("用法：admin add|list|remove|org|repo|gitlab|gitea …");

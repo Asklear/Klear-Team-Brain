@@ -1,4 +1,5 @@
-# registry —— 登记的 GitHub org / repo + 各自的 PAT，决定"有哪些 github space"（REDESIGN §3.4）。
+# registry —— 登记的代码托管 org/repo + 各自的 PAT/token，决定"有哪些团队 space"（REDESIGN §3.4）。
+# 支持三家：github（顶层，单实例 github.com）/ gitlab / gitea（自建可多实例，见下）。
 # 复制成 registry.yaml 填真实值。registry.yaml 含 PAT → 已 gitignore，别提交（住服务器，跟 tokens.yaml 一样）。
 # 服务器启动加载、改完 systemctl restart 生效。可用 `brain admin org/repo add ... --pat <PAT>` 维护。
 #
@@ -13,6 +14,34 @@ github:
   repos:
     - { owner: someone, repo: their-repo, pat: "ghp_repoPATyyyy" }   # 单仓一把
     - { owner: public-user, repo: public-repo }             # 公开仓可不填 pat（走全局/匿名）
+
+# ---- GitLab（自建可多实例；每实例 host + base_url + token，下挂 group/project）----
+# space_key = gitlab__<host>__<owner拍平>__<repo>；owner 子组（group/sub）真值落 space.yaml，不在 key 里。
+# token 粒度：project 一把 / group 一把（覆盖其下含子组全部）/ 实例一把兜底。
+# 用 `brain admin gitlab instance|group|project add ...` 维护。
+# gitlab:
+#   instances:
+#     - host: gitlab.com                       # remote host，决定哪些 remote 归这个实例
+#       base_url: https://gitlab.com           # API 根（自建填你的域名）；不填默认 https://<host>
+#       token: "glpat-instanceTokenxxxx"       # 实例级兜底 token（PRIVATE-TOKEN）
+#       groups:
+#         - { group: mygroup, token: "glpat-groupTokenyyyy" }   # 含子组：mygroup/sub/* 都算这个 group
+#         - platform                                            # 字符串简写，用实例级 token
+#       projects:
+#         - { owner: someone, repo: their-proj, token: "glpat-projTokenzzzz" }   # 单 project 一把
+#         - someone/sub/their-proj                              # 子组里的单 project（owner=someone/sub）
+
+# ---- Gitea（自建可多实例；API 同构 GitHub，鉴权头 token）----
+# space_key = gitea__<host>__<owner>__<repo>。用 `brain admin gitea instance|org|repo add ...` 维护。
+# gitea:
+#   instances:
+#     - host: gitea.example.com
+#       base_url: https://gitea.example.com
+#       token: "giteaTokenxxxx"
+#       orgs:
+#         - { org: team, token: "orgTokenyyyy" }
+#       repos:
+#         - someone/their-repo
 
 # 仓转移映射（owner/repo 旧→新）。迁移 + live ingest 都用：
 #   · 迁移：把旧 github 空间「改名/并入」到现位置，而不是降级。

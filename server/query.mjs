@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { readdirSync, statSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, relative } from "node:path";
 import { safeSegment, safeRelPath } from "../core/safe.mjs";
-import { fm } from "../core/card.mjs";
+import { fm, readUsage } from "../core/card.mjs";
 import { canonicalSpaceKey, canonicalizeSubject, resolveAuthorQuery, authorMatches } from "../core/identity.mjs";
 
 const pexec = promisify(execFile);
@@ -225,6 +225,123 @@ export async function sessionsTruth(TRUTH, { author, space, since, until, limit 
   // 只有显式 withIngestDate 时才算（web 列表用 work_start/work_end，不需要它）。
   if (withIngestDate) for (const r of top) r.ingest_date = await ingestDateOf(TRUTH, r.path);
   return { sessions: top, total: rows.length, truncated: rows.length > n };
+}
+
+// stats：全队【聚合统计】——把每条 session 卡片 frontmatter 的数值字段（tokens_*/turns）按维度 group-by 求和。
+// 设计同 sessions/spaceStats：现读卡片头部（headOf 走 mtime 缓存，便宜）、零落盘索引（守"视图可重建"不变量）。
+// ⚠️ 时间维（day/week）走【工作时间】（卡片 date~updated），不是入库时间——与 sessions 一致，与 log 相反。
+// 通用性：by/split 任选维度、metric 任选指标 → 一个原语答"每天多少 token / 各项目几条 session / 谁轮次最多"等。
+//   维度 by/split ∈ day|week|person|space|tool；指标 metric ∈ tokens|tokens_io|tokens_in|tokens_out|cache|sessions|turns。
+//   by 可【多选】（逗号串/数组）→ 组合键分组（如 by="day,person" = 每天每人一行，key="2026-06-22 · hank"）。
+//   首维是时间则列表按时间倒序分段、同段内按指标排；否则全按指标降序。
+//   另给 split → 每个组再按 split 拆出 cells（与 by 正交；如 by=day split=person = 每天一行、下挂各人）。
+const STAT_DIMS = new Set(["day", "week", "person", "space", "tool"]);
+const newAgg = () => ({ sessions: 0, turns: 0, tokens_in: 0, tokens_out: 0, tokens_cache_r: 0, tokens_cache_w: 0, tokens_total: 0 });
+function addToAgg(agg, f) {
+  agg.sessions++;
+  agg.turns += f.turns || 0;
+  if (f.usage) {
+    agg.tokens_in += f.usage.in; agg.tokens_out += f.usage.out;
+    agg.tokens_cache_r += f.usage.cache_r; agg.tokens_cache_w += f.usage.cache_w;
+    agg.tokens_total += f.usage.total;
+  }
+}
+function metricOf(agg, metric) {
+  switch (metric) {
+    case "sessions": return agg.sessions;
+    case "turns": return agg.turns;
+    case "tokens_in": return agg.tokens_in;
+    case "tokens_out": return agg.tokens_out;
+    case "tokens_io": return agg.tokens_in + agg.tokens_out;   // token 不含缓存（实际消耗）
+    case "cache": return agg.tokens_cache_r + agg.tokens_cache_w;
+    default: return agg.tokens_total;     // tokens（默认，含缓存）
+  }
+}
+// 某天所在 ISO 周的周一（UTC）→ 'YYYY-MM-DD'，作为 week 维度的桶键。
+function isoWeekStart(dateStr) {
+  const d = new Date(String(dateStr).slice(0, 10) + "T00:00:00Z");
+  if (Number.isNaN(d.getTime())) return String(dateStr).slice(0, 10);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));   // 回退到周一（Mon=0）
+  return d.toISOString().slice(0, 10);
+}
+function dimVal(dim, f, registry) {
+  switch (dim) {
+    case "day": return f.work_start.slice(0, 10);
+    case "week": return isoWeekStart(f.work_start);
+    case "person": return f.producer_id || f.author || "?";
+    case "space": return canonicalSpaceKey(registry, f.space_key);
+    case "tool": return f.tool || "?";
+    default: return "?";
+  }
+}
+
+export async function statsTruth(TRUTH, { by = "day", split, metric = "tokens", since, until, space, author, tool, roster = { members: [] }, registry = {}, limit = 200, offset = 0 } = {}) {
+  // by 支持多选（数组或逗号串）→ 组合键分组（如 by="day,person" = 每天每人一行）。去重保序。
+  const rawDims = (Array.isArray(by) ? by : String(by ?? "day").split(",")).map((s) => String(s).trim()).filter(Boolean);
+  const seenDim = new Set();
+  const byDims = (rawDims.length ? rawDims : ["day"]).filter((d) => !seenDim.has(d) && seenDim.add(d));
+  for (const d of byDims) if (!STAT_DIMS.has(d)) throw new Error(`bad by（维度只能是 ${[...STAT_DIMS].join("/")}）`);
+  if (split && !STAT_DIMS.has(split)) throw new Error(`bad split（只能是 ${[...STAT_DIMS].join("/")}）`);
+  if (split && byDims.includes(split)) split = undefined;       // 拆分维与分组维重合则无意义
+  const resolved = resolveAuthorQuery(roster, author);
+  const wantSpace = space ? canonicalSpaceKey(registry, space) : null;
+  const wantTool = tool ? String(tool).toLowerCase() : null;
+  const sinceD = since ? String(since).slice(0, 10) : null;
+  const untilD = until ? String(until).slice(0, 10) : null;
+
+  const groups = new Map();                                     // 维度键 → { total: agg, cells: Map(splitKey→agg) }
+  const totals = newAgg();
+  let scanned = 0, withUsage = 0;
+  for (const mdPath of walkMd(join(TRUTH, "spaces"))) {
+    const rel = relative(TRUTH, mdPath);
+    if (!rel.includes("/sessions/")) continue;                  // 只看 session 卡片
+    const head = headOf(mdPath); if (head == null) continue;
+    const date = fm(head, "date"); if (!date) continue;          // 非 session 卡片（无 date）
+    const f = {
+      work_start: date, work_end: fm(head, "updated") || date,
+      producer_id: fm(head, "producer_id"), author: fm(head, "submitter") || fm(head, "producer"),
+      tool: fm(head, "tool"), turns: Number(fm(head, "turns")) || 0,
+      space_key: rel.split("/")[1] || "", usage: readUsage(head),
+    };
+    if (wantSpace && canonicalSpaceKey(registry, f.space_key) !== wantSpace) continue;
+    if (!authorMatches(resolved, { producerId: f.producer_id, author: f.author })) continue;
+    if (wantTool && (f.tool || "").toLowerCase() !== wantTool) continue;
+    const ws = f.work_start.slice(0, 10), we = f.work_end.slice(0, 10);
+    if (sinceD && we < sinceD) continue;                         // 工作区间与查询窗不相交 → 排除
+    if (untilD && ws > untilD) continue;
+    scanned++; if (f.usage) withUsage++;
+    const keys = byDims.map((d) => dimVal(d, f, registry));     // 各维取值 → 组合键
+    const gk = keys.join("");                             // map 唯一键（用控制符分隔，避免值里有 · 撞键）
+    let g = groups.get(gk); if (!g) groups.set(gk, g = { keys, total: newAgg(), cells: new Map() });
+    addToAgg(g.total, f);
+    if (split) { const sk = dimVal(split, f, registry); let c = g.cells.get(sk); if (!c) g.cells.set(sk, c = newAgg()); addToAgg(c, f); }
+    addToAgg(totals, f);
+  }
+
+  let rows = [...groups.values()].map((g) => ({
+    key: g.keys.join(" · "), keys: g.keys, ...g.total,           // key=展示串、keys=各维原值（客户端按维度各自标注）
+    ...(split ? { cells: [...g.cells.entries()].map(([k, c]) => ({ key: k, ...c })).sort((x, y) => metricOf(y, metric) - metricOf(x, metric)) } : {}),
+  }));
+  // 排序：首维是时间 → 先按【前导时间维】倒序（新→旧）分段，同段内按指标降序；否则全按指标降序（看排名）。
+  rows.sort((a, b) => {
+    for (let i = 0; i < byDims.length && (byDims[i] === "day" || byDims[i] === "week"); i++) {
+      const c = b.keys[i].localeCompare(a.keys[i]);              // 时间倒序
+      if (c) return c;
+    }
+    return metricOf(b, metric) - metricOf(a, metric);
+  });
+  const peak = rows.reduce((m, r) => Math.max(m, metricOf(r, metric)), 0);   // 全量峰值：翻页时柱子按它统一缩放，跨页可比
+  const total = rows.length;
+  const off = Math.min(Math.max(Number(offset) || 0, 0), total);
+  const n = Math.min(Math.max(Number(limit) || 200, 1), 1000);
+  const page = rows.slice(off, off + n);
+  return {
+    by: byDims.join(","), dims: byDims, split: split || null, metric, since: sinceD, until: untilD,
+    rows: page, totals, peak,
+    total, offset: off, limit: n,                               // 翻页：total=全量组数，offset/limit=本页窗口
+    coverage: { sessions: scanned, with_usage: withUsage },     // with_usage<sessions = 部分 session 无 token 数据（如改 slim 前的 Codex）
+    truncated: off + page.length < total,                       // 还有下一页
+  };
 }
 
 // find：按文件名 glob / 子目录前缀找文件（git ls-files：只列已提交、天然锁仓内、跨平台）。

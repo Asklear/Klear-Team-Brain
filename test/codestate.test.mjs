@@ -43,3 +43,31 @@ test("refreshAll: 懒加载 —— 没有 session 的 github space 被跳过（�
   assert.equal(gh.skipped, "no-session");
   assert.ok(!out.some((x) => x.space === "local__hank"));   // local 不进 code-state
 });
+
+test("enumAndRegisterOrgRepos: gitlab project / gitea repo 预登记（单仓无需网络）", async () => {
+  const truth = freshTruth();
+  const reg = {
+    gitlab: { instances: [{ host: "gitlab.com", base_url: "https://gitlab.com", projects: [{ owner: "grp/sub", repo: "proj" }] }] },
+    gitea: { instances: [{ host: "gitea.x.com", base_url: "https://gitea.x.com", repos: ["team/svc"] }] },
+  };
+  const r = await enumAndRegisterOrgRepos(truth, reg, "");
+  assert.equal(r.registered, 2);
+  const gl = readFileSync(join(truth, "spaces", "gitlab__gitlab.com__grp-sub__proj", "space.yaml"), "utf8");
+  assert.match(gl, /provider: gitlab/);
+  assert.match(gl, /host: gitlab\.com/);
+  assert.match(gl, /owner: grp\/sub/);     // 真值（子组）存盘，不是拍平后的 key 段
+  assert.match(gl, /repo: proj/);
+  assert.match(gl, /ref: gitlab\.com\/grp\/sub\/proj/);
+  const gt = readFileSync(join(truth, "spaces", "gitea__gitea.x.com__team__svc", "space.yaml"), "utf8");
+  assert.match(gt, /provider: gitea/);
+  assert.match(gt, /base_url: https:\/\/gitea\.x\.com/);
+});
+
+test("refreshAll: 认 gitlab/gitea 前缀，无 session 一样懒跳过（不触网）", async () => {
+  const truth = freshTruth();
+  const reg = { gitlab: { instances: [{ host: "gitlab.com", base_url: "https://gitlab.com", projects: [{ owner: "g", repo: "r" }] }] } };
+  await enumAndRegisterOrgRepos(truth, reg, "");
+  const out = await refreshAll(truth, reg, "");
+  const gl = out.find((x) => x.space === "gitlab__gitlab.com__g__r");
+  assert.equal(gl.skipped, "no-session");
+});

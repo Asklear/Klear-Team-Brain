@@ -4,23 +4,24 @@
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
-import { readFileSync, existsSync, createReadStream, statSync } from "node:fs";
+import { readFileSync, existsSync, createReadStream, statSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { execFileSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { loadRoster, loadTokens, tokenIndex } from "../core/team.mjs";
-import { loadRegistry, patFor, hasGithub } from "../core/registry.mjs";
+import { loadRegistry, hasAnyRemote } from "../core/registry.mjs";
+import { clientFor, ctxFor } from "../core/repohost.mjs";
 import { redactReadable } from "../core/redact.mjs";
 import { log } from "../core/log.mjs";
-import { fm } from "../core/card.mjs";
-import { ownerRepoFromRef, fileContent } from "../core/github.mjs";
 import { safeSegment, safeRelPath } from "../core/safe.mjs";
 import { loadFeishu, makeReq } from "../core/feishu.mjs";
 import { initTruth } from "./gitstore.mjs";
 import { ingest } from "./ingest.mjs";
 import { refreshAll, enumAndRegisterOrgRepos } from "./codestate.mjs";
+import { readSpaceMeta } from "./space.mjs";
 import { syncFeishuDocs } from "./feishudocs.mjs";
-import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, frontmatterOf, spaceStatsTruth } from "./query.mjs";
+import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, statsTruth, frontmatterOf, spaceStatsTruth } from "./query.mjs";
 import { canonicalizePath, canonicalSpaceKey } from "../core/identity.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -87,13 +88,28 @@ const extractAnswer = (out) => {
 
 // 客户端自托管：把这份客户端代码打成 tarball（无密钥），供新人 `curl /get | bash` 下载。
 const CLIENT_TGZ = "/tmp/team-brain-client.tgz";
+// 客户端只跑 sync / cli / mcp（不碰飞书）→ 装机包里换上**精简版 package.json**：只留客户端真用到的依赖，
+// 砍掉 server-only 的 lark SDK（@larksuiteoapi/node-sdk，含 axios/protobufjs 等 ~26M，占 node_modules 近一半）。
+// 不带 package-lock.json：lock 里记着 lark 全树，带上反而让 npm 装回来；少了 lock，npm 按精简 deps 现解（就 3 个）。
+const CLIENT_DEPS = new Set(["@modelcontextprotocol/sdk", "yaml", "zod"]);
 function buildClientTarball() {
+  let stage;
   try {
-    execFileSync("tar", ["czf", CLIENT_TGZ, "-C", ROOT,
-      "core", "client", "mcp", "cli", "package.json", "package-lock.json",
-      "install.sh", "client.config.example.yaml"], { stdio: "ignore" });
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    const clientPkg = {
+      ...pkg,
+      dependencies: Object.fromEntries(Object.entries(pkg.dependencies || {}).filter(([k]) => CLIENT_DEPS.has(k))),
+    };
+    if (clientPkg.scripts) delete clientPkg.scripts.server;   // 客户端不跑 server
+    stage = mkdtempSync(join(tmpdir(), "tb-client-"));
+    writeFileSync(join(stage, "package.json"), JSON.stringify(clientPkg, null, 2) + "\n");
+    // tar 多个 -C：代码取自 ROOT，package.json 取自 stage（GNU/BSD tar 都支持）。
+    execFileSync("tar", ["czf", CLIENT_TGZ,
+      "-C", ROOT, "core", "client", "mcp", "cli", "install.sh", "client.config.example.yaml",
+      "-C", stage, "package.json"], { stdio: "ignore" });
     log.info("[client] 已打包客户端", { path: CLIENT_TGZ });
   } catch (e) { log.warn("[client] 打包失败", { err: e.message }); }
+  finally { if (stage) try { rmSync(stage, { recursive: true, force: true }); } catch {} }
 }
 buildClientTarball();
 
@@ -146,6 +162,7 @@ const countOf = (o) => {
   if (Array.isArray(o.commits)) return o.commits.length;
   if (Array.isArray(o.files)) return o.files.length;
   if (Array.isArray(o.entries)) return o.entries.length;
+  if (Array.isArray(o.rows)) return o.rows.length;
   if (typeof o.matches === "string") return o.matches ? o.matches.split("\n").length : 0;
   return undefined;
 };
@@ -401,6 +418,28 @@ async function handle(req, res, u) {
     } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
   }
 
+  // --- stats：全队聚合统计（按【工作时间】，与 sessions 同源；只读卡片 frontmatter、零落盘索引）---
+  if (req.method === "GET" && u.pathname === "/stats") {
+    if (!authMember(req)) return json(res, 401, { error: "invalid token" });
+    try {
+      const space = u.searchParams.get("space") || undefined;
+      const r = await statsTruth(TRUTH, {
+        by: u.searchParams.get("by") || undefined,
+        split: u.searchParams.get("split") || undefined,
+        metric: u.searchParams.get("metric") || undefined,
+        since: u.searchParams.get("since") || undefined,
+        until: u.searchParams.get("until") || undefined,
+        space: space ? resolveSpace(space) : undefined,         // 别名/历史 space 收窄也能命中（兜底）
+        author: u.searchParams.get("author") || undefined,
+        tool: u.searchParams.get("tool") || undefined,
+        limit: u.searchParams.get("limit"),
+        offset: u.searchParams.get("offset"),
+        roster, registry,
+      });
+      return json(res, 200, r);
+    } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
+  }
+
   // --- read_github：按需现拉内容 / 看 code-state（块: read_github）---
   if (req.method === "GET" && u.pathname === "/github") {
     if (!authMember(req)) return json(res, 401, { error: "invalid token" });
@@ -408,21 +447,23 @@ async function handle(req, res, u) {
     try { safeSegment(space_key, "space_key"); } catch { return json(res, 400, { error: "bad space_key" }); }
     const path = u.searchParams.get("path");
     const ref = u.searchParams.get("ref") || undefined;
-    const syp = join(TRUTH, "spaces", space_key, "space.yaml");
-    const or = ownerRepoFromRef(existsSync(syp) ? fm(readFileSync(syp, "utf8"), "ref") : "");
-    if (!or) return json(res, 404, { error: "该 space 无 github 坐标" });
-    const ghToken = patFor(registry, or.owner, or.repo, GITHUB_TOKEN);   // org 一把 / repo 每仓一把 / 否则全局
-    if (!ghToken) return json(res, 503, { error: "该 space 无可用 GitHub PAT（registry 未配，且无全局 GITHUB_TOKEN）" });
+    const meta = readSpaceMeta(TRUTH, space_key);          // provider/host/owner/repo/base_url（老 github 空间自动归一）
+    const client = clientFor(meta.provider);
+    if (!meta.owner || !meta.repo || !client) return json(res, 404, { error: "该 space 无可现拉的代码坐标" });
+    const ctx = ctxFor(registry, meta, GITHUB_TOKEN);
+    if (!ctx.token) return json(res, 503, { error: meta.provider === "github"
+      ? "该 space 无可用 GitHub PAT（registry 未配，且无全局 GITHUB_TOKEN）"
+      : `该 space 无可用 ${meta.provider} token（registry 未配该实例/项目）` });
     try {
       if (path) {
-        const content = await fileContent(or.owner, or.repo, path, ref, ghToken);
+        const content = await client.fileContent(meta.owner, meta.repo, path, ref, ctx);
         return json(res, 200, { space_key, path, ref: ref || "default", content });
       }
       const csp = join(TRUTH, "spaces", space_key, "code-state.md");
       return json(res, 200, { space_key, code_state: existsSync(csp) ? readFileSync(csp, "utf8") : "（尚无 code-state，等首次 4h 轮询）" });
     } catch (e) {
-      log.warn("github read failed", { who: req._who, space_key, err: String(e.message || e).slice(0, 200) });
-      return json(res, 502, { error: "GitHub 读取失败（详情见服务器日志）" });
+      log.warn("repo read failed", { who: req._who, space_key, err: String(e.message || e).slice(0, 200) });
+      return json(res, 502, { error: "代码托管读取失败（详情见服务器日志）" });
     }
   }
 
@@ -456,12 +497,12 @@ log.info(ASK.enabled ? "[ask] 「问一句」已启用" : "[ask] 「问一句」
 const NO_POLL = process.env.NO_POLL === "1";
 if (NO_POLL) log.info("[no-poll] 后台轮询已关（NO_POLL=1）：code-state / feishu 同步跳过，TRUTH 保持静态");
 
-// code-state 4h 轮询（registry 有 github 登记、或配了全局 GITHUB_TOKEN 就启用）
-if (!NO_POLL && (GITHUB_TOKEN || hasGithub(registry))) {
-  // 启动时按 registry 枚举 org/repo → 预登记 space（无 session 也建），再跑首轮 code-state（懒加载只刷有 session 的）
-  // 每个仓用它该用的 PAT：org 一把覆盖全部 repo、单独登记的 repo 每仓一把、否则回退全局 GITHUB_TOKEN
+// code-state 4h 轮询（registry 有任一 provider 登记、或配了全局 GITHUB_TOKEN 就启用）
+if (!NO_POLL && (GITHUB_TOKEN || hasAnyRemote(registry))) {
+  // 启动时按 registry 枚举 scope（github org / gitlab group / gitea org）的 repo → 预登记 space（无 session 也建），
+  // 再跑首轮 code-state（懒加载只刷有 session 的）。各仓 token/baseUrl 由 ctxFor 按 registry 解。
   const tick = () => enumAndRegisterOrgRepos(TRUTH, registry, GITHUB_TOKEN)
-    .then((e) => e.registered && log.info("[registry] 预登记 github space", { count: e.registered }))
+    .then((e) => e.registered && log.info("[registry] 预登记 space", { count: e.registered }))
     .then(() => refreshAll(TRUTH, registry, GITHUB_TOKEN))
     .then((r) => log.info("[code-state] 刷新完成", { active: r.filter((x) => !x.skipped).length, skipped: r.filter((x) => x.skipped).length }))
     .catch((e) => log.error("[code-state] 失败", { err: e.message }));

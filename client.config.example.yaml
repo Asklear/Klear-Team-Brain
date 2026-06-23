@@ -10,6 +10,8 @@ me:
 upload_folders:
   - /Users/you/Documents/Code/your-team-stuff
   # - ~/Documents/Code/your-team-stuff  # 也支持前导 ~
+# collect_all: true   # 不按 upload_folders 闸门、采集本机所有 session（安装时没填工作空间的默认）。
+                       # 含密钥/客户数据的机器别开；只放开 session，本地 .md 仍只从 upload_folders 扫。
 exclude:
   - /Users/you/Documents/Code/your-team-stuff/secret
 
