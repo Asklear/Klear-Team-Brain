@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { parse, stringify } from "yaml";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const TEAM = join(ROOT, "team.yaml");
+const TEAM = process.env.TEAM_FILE || join(ROOT, "team.yaml");   // 与 server.mjs 同口径（docker 用 TEAM_FILE 指持久卷）
 const TOKENS = process.env.TOKENS_FILE || join(ROOT, "tokens.yaml");
 const REGISTRY = process.env.REGISTRY_FILE || join(ROOT, "registry.yaml");
 const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };

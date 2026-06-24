@@ -1,10 +1,32 @@
 # Self-hosting Klear-Team-Brain
 
-Klear-Team-Brain is self-hosted and single-tenant: **you** run the server, and nothing leaves your infrastructure. This guide covers a server (one small VPS) plus client machines.
+Klear-Team-Brain is self-hosted and single-tenant: **you** run the server, and nothing leaves your infrastructure. This guide covers the server — the fastest way is **[Docker](#docker)** (one command), or a manual setup on a small VPS — plus the client machines.
 
 > **Where to host:** the asking side uses an LLM and needs to reach GitHub, so pick a region where your LLM provider and GitHub are reachable. The truth store holds your team's work — keep the host private to your circle and back it up.
 
-> **Docker:** a `docker-compose` setup is on the roadmap. For now, the steps below are the supported path.
+---
+
+## Docker
+
+The fastest way to stand up a server — needs Docker + Docker Compose. (Prefer manual setup? Skip to [section 1](#1-server-one-vps).)
+
+```bash
+git clone https://github.com/Asklear/Klear-Team-Brain.git && cd Klear-Team-Brain
+docker compose up -d                        # builds + runs the server on http://localhost:8787
+docker compose logs server | grep token     # the access token it auto-mints on first boot
+```
+
+What you get: the server binds to **loopback only** (`127.0.0.1:8787` — reachable from this host, not the public internet), persists its truth store in a named volume, and bootstraps a roster + token into `./config/` on first boot. To point a client at it, put `server_url: http://localhost:8787` + the token from the logs into a `client.config.yaml` — see the [manual client path](#2-clients-each-dev-machine). (Don't use `npm run quickstart` here — that mints its *own* separate token under the repo root, which this container won't recognize.)
+
+- **Port already taken?** `HOST_PORT=8788 docker compose up -d`.
+- **Real domain + HTTPS:** bring up the bundled Caddy reverse proxy (automatic TLS):
+  ```bash
+  DOMAIN=brain.you.com PUBLIC_URL=https://brain.you.com docker compose --profile tls up -d
+  ```
+  Caddy terminates HTTPS on 443 and proxies to the server over the internal network — `8787` never leaves the container network. (Point your domain's DNS at the host first.)
+- **More members:** edit `./config/team.yaml` + `./config/tokens.yaml`, then `docker compose restart server`.
+- **Enable code-state / Feishu polling:** set `NO_POLL=0` and drop `registry.yaml` / `feishu.yaml` into `./config/`.
+- **Behind a flaky network / firewall** (e.g. China): if the build fails pulling `node:22-slim` or Debian packages mid-download (`unexpected EOF`), set a registry mirror in Docker's daemon settings and retry — Docker resumes partial layers, so a few retries usually get through.
 
 ---
 
@@ -27,12 +49,17 @@ npm install --omit=dev
 
 ### 1.3 Roster + tokens
 
-- `team.yaml` — your roster (id / name / email / git name aliases). No secrets; safe to keep on the server. Copy from `team.example.yaml`.
-- `tokens.yaml` — **secret, never commit** — one random token per member:
-  ```bash
-  cp tokens.example.yaml tokens.yaml
-  openssl rand -hex 24    # generate one per member, fill them in
-  ```
+Two files hold who's in: `team.yaml` (roster — id / name / email / git-name aliases; no secrets, safe to keep on the server) and `tokens.yaml` (**secret, never commit** — one random token per member). Two ways to fill them:
+
+**Recommended — `server/admin.mjs add` (writes both + prints an invite code).** Run it on the server (after the service in §1.6 is up — it restarts the service to apply):
+
+```bash
+node server/admin.mjs add alice --name "Alice" --server-url https://brain.yourdomain.com
+```
+
+This appends Alice to `team.yaml` + `tokens.yaml`, restarts the service, and prints a `BRAIN-…` **invite code** plus a ready-to-send onboarding message. That invite code is exactly what `brain join` expects in [section 2](#2-clients-each-dev-machine).
+
+**Manual alternative.** Create the files by hand — copy `team.example.yaml` → `team.yaml`, and `tokens.example.yaml` → `tokens.yaml` with one `openssl rand -hex 24` per member. Members set up this way use the **manual client path** in §2 (raw token in `client.config.yaml`) — `brain join` takes an invite code, not a raw token.
 
 ### 1.4 Pick a durable, backed-up path for the truth store
 
@@ -96,16 +123,16 @@ The full walkthrough — creating the app, which scopes to enable, and the **non
 
 ## 2. Clients (each dev machine)
 
-The simplest path uses the server's self-hosted client bundle:
+The simplest path uses the server's self-hosted client bundle + the invite code from §1.3:
 
 ```bash
 curl -fsSL https://brain.yourdomain.com/get | bash   # downloads the client + registers the `brain` command
-brain join <INVITE_TOKEN>                             # verify + pick workspaces + wire MCP + first sync + install resident
+brain join BRAIN-xxxxxxxx                             # the invite code from `server/admin.mjs add` — verify + pick workspaces + wire MCP + first sync + install resident
 ```
 
-`brain join` is interactive: confirm the workspaces to collect, acknowledge the privacy notice, done. After that, keep using Claude Code / Codex as usual — sessions flow into the brain automatically.
+`brain join` is interactive: confirm the workspaces to collect, acknowledge the privacy notice, done. After that, keep using Claude Code / Codex as usual — sessions flow into the brain automatically. (`brain join` takes the `BRAIN-…` code, not a raw token — if you provisioned tokens manually in §1.3, use the manual path below instead.)
 
-Manual alternative (clone + configure):
+Manual alternative (raw token — clone + configure):
 
 ```bash
 git clone https://github.com/Asklear/Klear-Team-Brain.git team-brain && cd team-brain && npm install

@@ -9,11 +9,11 @@ const codexWithGit = [
   JSON.stringify({
     timestamp: "2026-05-17T09:34:51.000Z", type: "session_meta",
     payload: {
-      id: "019e3549", cwd: "/Users/gaorongvc/work/other/bossa",
+      id: "019e3549", cwd: "/Users/gaorongvc/work/other/repo1",
       git: {
         commit_hash: "deadbeef",
         branch: "etl/node-first-on-spec022",
-        repository_url: "git@github.com:coldestlin/bossa.git",
+        repository_url: "git@github.com:olduser1/repo1.git",
       },
     },
   }),
@@ -30,8 +30,8 @@ const codexWithGit = [
 test("codex: 从 session_meta.git 抽真实 branch / repoUrl", () => {
   const s = parseSessionText(codexWithGit, "codex");
   assert.equal(s.branch, "etl/node-first-on-spec022");
-  assert.equal(s.repoUrl, "git@github.com:coldestlin/bossa.git");
-  assert.equal(s.cwd, "/Users/gaorongvc/work/other/bossa");
+  assert.equal(s.repoUrl, "git@github.com:olduser1/repo1.git");
+  assert.equal(s.cwd, "/Users/gaorongvc/work/other/repo1");
   assert.equal(s.intent, "把 node-first 的 etl 跑通");
 });
 
@@ -148,7 +148,7 @@ test("session-history-md: 从 JSONL 包装中解析 md 元数据和正文", () =
       type: "session_history_meta",
       timestamp: "2026-06-13T10:00:00.000Z",
       updated: "2026-06-13T10:02:00.000Z",
-      cwd: "/work/bossa",
+      cwd: "/work/repo1",
       branch: "main",
       filename: "daily.md",
     }),
@@ -159,7 +159,7 @@ test("session-history-md: 从 JSONL 包装中解析 md 元数据和正文", () =
     }),
   ].join("\n");
   const s = parseSessionText(raw, "session-history-md");
-  assert.equal(s.cwd, "/work/bossa");
+  assert.equal(s.cwd, "/work/repo1");
   assert.equal(s.branch, "main");
   assert.equal(s.intent, "今天进展");
   assert.equal(s.updated, "2026-06-13T10:02:00.000Z");

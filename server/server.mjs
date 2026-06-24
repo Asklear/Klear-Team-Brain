@@ -52,7 +52,7 @@ const WEB_TYPES = {
   ".png": "image/png", ".woff2": "font/woff2", ".map": "application/json",
 };
 
-const roster = loadRoster(join(ROOT, "team.yaml"));
+const roster = loadRoster(process.env.TEAM_FILE || join(ROOT, "team.yaml"));  // 默认 ROOT/team.yaml；docker 用 TEAM_FILE 指到持久卷
 const tokens = tokenIndex(roster, loadTokens(process.env.TOKENS_FILE || join(ROOT, "tokens.yaml")));
 const registry = loadRegistry(process.env.REGISTRY_FILE || join(ROOT, "registry.yaml"));  // 登记的 github org/repo（启动加载、restart 生效）
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN
@@ -101,7 +101,8 @@ function buildClientTarball() {
       ...pkg,
       dependencies: Object.fromEntries(Object.entries(pkg.dependencies || {}).filter(([k]) => CLIENT_DEPS.has(k))),
     };
-    if (clientPkg.scripts) delete clientPkg.scripts.server;   // 客户端不跑 server
+    // 客户端包只含 core/client/mcp/cli —— 删掉指向未打包文件的脚本：server（无 server/）、quickstart（无 scripts/，且本就是 git clone 本地起服务的玩法）。
+    if (clientPkg.scripts) { delete clientPkg.scripts.server; delete clientPkg.scripts.quickstart; }
     stage = mkdtempSync(join(tmpdir(), "tb-client-"));
     writeFileSync(join(stage, "package.json"), JSON.stringify(clientPkg, null, 2) + "\n");
     // tar 多个 -C：代码取自 ROOT，package.json 取自 stage（GNU/BSD tar 都支持）。
@@ -323,7 +324,7 @@ async function handle(req, res, u) {
   // .jsonl 原文无 frontmatter → 整体脱敏兜底，挡裸密钥/家目录离机。
   if (req.method === "GET" && u.pathname === "/read") {
     if (!authMember(req)) return json(res, 401, { error: "invalid token" });
-    // 坐标归一（兜底）：agent 可能抄了 log 给的旧/别名 space（haurhi…）→ 现位置找不到才映射，消除 404 类不一致
+    // 坐标归一（兜底）：agent 可能抄了 log 给的旧/别名 space（olduser2…）→ 现位置找不到才映射，消除 404 类不一致
     const path = resolvePath(u.searchParams.get("path") || "");
     let abs;
     try { abs = safeRelPath(TRUTH, path, "path"); } catch { return json(res, 400, { error: "bad path" }); }
@@ -405,7 +406,7 @@ async function handle(req, res, u) {
   }
 
   // --- sessions：按【人 + 工作时间】检索 session（这条链路的主原语）---
-  // 时间走卡片 frontmatter 的工作时间（非 commit 时间）；身份走花名册归一（tqt==taoqitian）；坐标 canonical。
+  // 时间走卡片 frontmatter 的工作时间（非 commit 时间）；身份走花名册归一（user1==username1）；坐标 canonical。
   if (req.method === "GET" && u.pathname === "/sessions") {
     if (!authMember(req)) return json(res, 401, { error: "invalid token" });
     try {

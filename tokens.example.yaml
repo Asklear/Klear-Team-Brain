@@ -1,4 +1,4 @@
 # 每人的接入 token（机密）。复制成 tokens.yaml 再填，tokens.yaml 已 gitignore、别提交。
 # key = team.yaml 里的成员 id；value = 随机串（生成：openssl rand -hex 24）
-hank: "PUT-A-RANDOM-TOKEN-HERE"
+user2: "PUT-A-RANDOM-TOKEN-HERE"
 # daniel: "..."

@@ -4,12 +4,12 @@ import { buildCard, fm, daysFields, readDays } from "../core/card.mjs";
 
 test("buildCard: 略过空值、写出非空字段 + 正文", () => {
   const card = buildCard(
-    { id: "x1", producer: "hank", space_key: "local__hank", folder: "bossa/docs", empty: "", nil: null, undef: undefined },
+    { id: "x1", producer: "user2", space_key: "local__user2", folder: "repo1/docs", empty: "", nil: null, undef: undefined },
     "**用户**：做点啥\n\n**助手**：搞定了",
   );
   assert.match(card, /^id: x1$/m);
-  assert.match(card, /^producer: hank$/m);
-  assert.match(card, /^folder: bossa\/docs$/m);
+  assert.match(card, /^producer: user2$/m);
+  assert.match(card, /^folder: repo1\/docs$/m);
   assert.doesNotMatch(card, /^empty:/m);
   assert.doesNotMatch(card, /^nil:/m);
   assert.doesNotMatch(card, /^undef:/m);

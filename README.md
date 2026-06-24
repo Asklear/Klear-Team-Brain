@@ -45,7 +45,28 @@ You get an answer synthesized across the team's **sessions + code + docs**, with
 
 **Prerequisites:** Node 22+, and an MCP-capable editor/CLI (Claude Code or Codex) to ask from.
 
-1. **Stand up a server** (one small VPS). See [DEPLOY.md](./DEPLOY.md) — install Node, clone, set `TRUTH_DIR`, add a roster + tokens, put HTTPS in front, run as a service.
+### Try it locally first (≈5 min — no VPS, no HTTPS, no invite token)
+
+Want to kick the tires before standing up a server? Run the whole thing on your own machine as a single user:
+
+```bash
+git clone https://github.com/Asklear/Klear-Team-Brain.git && cd Klear-Team-Brain
+npm install
+npm run quickstart        # one-time: mint a local identity + token, point the client at localhost, wire up MCP
+npm run server            # starts the truth store on http://127.0.0.1:8787 — leave this running
+```
+
+Then, **in a second terminal**, capture your local sessions:
+
+```bash
+npm run sync -- --once    # capture once (or `npm run sync` to keep watching in the background)
+```
+
+Now ask from your editor, or open `http://127.0.0.1:8787/` to browse. Everything stays on your machine. Prefer a containerized server? Use `docker compose up -d` — see [DEPLOY.md](./DEPLOY.md#docker).
+
+### Deploy for your team
+
+1. **Stand up a server** (one small VPS) — manually or with one command via `docker compose`. See [DEPLOY.md](./DEPLOY.md) — install Node, clone, set `TRUTH_DIR`, add a roster + tokens, put HTTPS in front, run as a service.
 2. **Onboard each member** — point the client at your server:
    ```bash
    curl -fsSL https://your-server.example.com/get | bash   # downloads the client + registers the `brain` command
@@ -69,6 +90,8 @@ With MCP wired up, ask in plain language inside CC / Codex (*"where did the auth
 | `find` | Find files by name/glob (complementary to grep: one searches content, one searches names). |
 | `read` | Read any file by path (paginate large files with offset/limit). |
 | `ls` | Inspect structure: which spaces exist, branches, session counts. |
+| `sessions` | Find sessions by person + work time (who did what, in a given window). |
+| `stats` | Aggregate token usage / session counts / turns by day/week/person/repo/tool. |
 | `log` | Activity timeline (the git history; narrow by space/author/since). |
 | `read_github` | Reach out to GitHub for live code state or a file's current contents (code itself isn't stored). |
 

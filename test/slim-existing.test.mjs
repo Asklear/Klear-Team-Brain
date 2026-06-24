@@ -19,11 +19,11 @@ function build() {
   const s = join(truth, "spaces");
   // 肥文件：含内联图片 base64
   const img = "data:image/png;base64," + "A".repeat(400000);
-  put(s, "github__Asklear__bossa", "main", "tqt-fat",
+  put(s, "github__Asklear__repo1", "main", "user1-fat",
     JSON.stringify({ type: "session_meta", payload: { cwd: "/w" } }) + "\n" +
     JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: `图 ${img}` } }) + "\n");
   // 干净文件：无 bloat → 应字节不动
-  put(s, "github__Asklear__bossa", "main", "hank-clean",
+  put(s, "github__Asklear__repo1", "main", "user2-clean",
     JSON.stringify({ type: "session_meta", payload: { cwd: "/w" } }) + "\n" +
     JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "改个小 bug" } }) + "\n");
   return truth;
@@ -31,20 +31,20 @@ function build() {
 
 test("slim-existing: 只蒸馏肥文件，干净文件字节不动", () => {
   const truth = build();
-  const s = join(truth, "spaces", "github__Asklear__bossa", "sessions", "main");
-  const fatBefore = readFileSync(join(s, "tqt-fat.jsonl"), "utf8");
-  const cleanBefore = readFileSync(join(s, "hank-clean.jsonl"), "utf8");
+  const s = join(truth, "spaces", "github__Asklear__repo1", "sessions", "main");
+  const fatBefore = readFileSync(join(s, "user1-fat.jsonl"), "utf8");
+  const cleanBefore = readFileSync(join(s, "user2-clean.jsonl"), "utf8");
 
   const r = slimExisting(truth, { apply: true });
 
   assert.equal(r.changed.length, 1, "只动 1 个肥文件");
-  const fatAfter = readFileSync(join(s, "tqt-fat.jsonl"), "utf8");
+  const fatAfter = readFileSync(join(s, "user1-fat.jsonl"), "utf8");
   assert.ok(fatAfter.length < fatBefore.length / 100, "肥文件被大幅压缩");
   assert.match(fatAfter, /image \d+KB omitted/);
   // 干净文件字节完全不变
-  assert.equal(readFileSync(join(s, "hank-clean.jsonl"), "utf8"), cleanBefore, "干净文件字节不动");
+  assert.equal(readFileSync(join(s, "user2-clean.jsonl"), "utf8"), cleanBefore, "干净文件字节不动");
   // 卡片不动
-  assert.ok(existsSync(join(s, "tqt-fat.md")));
+  assert.ok(existsSync(join(s, "user1-fat.md")));
 });
 
 test("slim-existing: 幂等 —— 二次跑无改动", () => {
@@ -56,9 +56,9 @@ test("slim-existing: 幂等 —— 二次跑无改动", () => {
 
 test("slim-existing: dry-run 不写盘", () => {
   const truth = build();
-  const s = join(truth, "spaces", "github__Asklear__bossa", "sessions", "main");
-  const before = readFileSync(join(s, "tqt-fat.jsonl"), "utf8");
+  const s = join(truth, "spaces", "github__Asklear__repo1", "sessions", "main");
+  const before = readFileSync(join(s, "user1-fat.jsonl"), "utf8");
   const r = slimExisting(truth, { apply: false });
   assert.equal(r.changed.length, 1, "报告将动 1 个");
-  assert.equal(readFileSync(join(s, "tqt-fat.jsonl"), "utf8"), before, "dry-run 不改盘");
+  assert.equal(readFileSync(join(s, "user1-fat.jsonl"), "utf8"), before, "dry-run 不改盘");
 });

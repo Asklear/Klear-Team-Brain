@@ -89,7 +89,7 @@ export async function logTruth(TRUTH, { space, since, author, grep, limit = 20, 
   }
   if (author != null && author !== "") args.push(`--author=${String(author).slice(0, 80)}`);
   if (grep != null && grep !== "") args.push(`--grep=${String(grep).slice(0, 200)}`, "-i");
-  // space 过滤：用户可能给别名/历史 key（haurhi…）→ 先归一到现位置目录再收窄
+  // space 过滤：用户可能给别名/历史 key（olduser2…）→ 先归一到现位置目录再收窄
   if (space) args.push("--", `spaces/${safeSegment(canonicalSpaceKey(registry, space), "space")}`);
   const { stdout } = await pexec("git", args, { timeout: TIMEOUT, maxBuffer: MAX_BUFFER });
   return stdout.split("\n").filter(Boolean).map((l) => {
@@ -136,7 +136,7 @@ function previewOf(text) {
 // sessions：按【人 + 工作时间】检索 session 卡片 —— 这条链路的主原语。
 // 与 log 的根本区别：时间维度走卡片 frontmatter 的 date(工作起)/updated(末次输入=工作止)，
 //   不是 commit 时间 → 批量回填也能按"真实何时干活"过滤排序，事故必然被查到。
-// 身份走花名册归一（tqt==taoqitian），坐标走 canonical（haurhi→Asklear）→ 返回的坐标能被 read 直接消费。
+// 身份走花名册归一（user1==username1），坐标走 canonical（olduser2→Asklear）→ 返回的坐标能被 read 直接消费。
 // 不落索引文件（守"视图可重建/别把索引塞落盘层"不变量）：现读卡片 frontmatter，零持久态、零漂移。
 // frontmatter 头部读取，按 mtime 缓存：只读前 HEAD_BYTES（不整文件读，session 可达 MB 级），
 // frontmatter + 预览首行都在头部。sessionsTruth 与 /find?meta 共用这一个 IO 原语。
@@ -235,7 +235,7 @@ export async function sessionsTruth(TRUTH, { author, space, since, until, limit 
 //    days 缺失的老卡片（未回填）回退老口径（整条算开始日）；Codex 的 token 拆不到天 → 整条记开始日（tokens_daily=start）。
 // 通用性：by/split 任选维度、metric 任选指标 → 一个原语答"每天多少 token / 各项目几条 session / 谁轮次最多"等。
 //   维度 by/split ∈ day|week|person|space|tool；指标 metric ∈ tokens|tokens_io|tokens_in|tokens_out|cache|sessions|turns。
-//   by 可【多选】（逗号串/数组）→ 组合键分组（如 by="day,person" = 每天每人一行，key="2026-06-22 · hank"）。
+//   by 可【多选】（逗号串/数组）→ 组合键分组（如 by="day,person" = 每天每人一行，key="2026-06-22 · user2"）。
 //   首维是时间则列表按时间倒序分段、同段内按指标排；否则全按指标降序。
 //   另给 split → 每个组再按 split 拆出 cells（与 by 正交；如 by=day split=person = 每天一行、下挂各人）。
 const STAT_DIMS = new Set(["day", "week", "person", "space", "tool"]);
