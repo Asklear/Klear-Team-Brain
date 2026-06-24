@@ -5,6 +5,7 @@ web/fixtures/
 # docker compose 运行态配置（自举的 team.yaml/tokens.yaml 等）—— gitignore 不支持行内注释，注释必须独占一行
 config/
 client.config.yaml
+team.yaml
 tokens.yaml
 registry.yaml
 feishu.yaml
