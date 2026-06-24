@@ -83,10 +83,10 @@ function makeTruth(cards) {
 }
 
 const TRUTH = makeTruth([
-  { space: "github__o__r", who: "hank", id: "s1", date: "2026-06-20T01:00:00Z", tool: "claude-code", turns: 3, usage: { in: 100, out: 10, cache_r: 0, cache_w: 0 } },
-  { space: "github__o__r", who: "tqt", id: "s2", date: "2026-06-20T05:00:00Z", tool: "codex", turns: 2, usage: { in: 200, out: 20, cache_r: 0, cache_w: 0 } },
-  { space: "local__hank", who: "hank", id: "s3", date: "2026-06-21T03:00:00Z", tool: "claude-code", turns: 5, usage: { in: 300, out: 30, cache_r: 0, cache_w: 0 } },
-  { space: "github__o__r", who: "tqt", id: "s4", date: "2026-06-21T09:00:00Z", tool: "codex", turns: 1 }, // 无 usage（如老 Codex）
+  { space: "github__o__r", who: "user2", id: "s1", date: "2026-06-20T01:00:00Z", tool: "claude-code", turns: 3, usage: { in: 100, out: 10, cache_r: 0, cache_w: 0 } },
+  { space: "github__o__r", who: "user1", id: "s2", date: "2026-06-20T05:00:00Z", tool: "codex", turns: 2, usage: { in: 200, out: 20, cache_r: 0, cache_w: 0 } },
+  { space: "local__user2", who: "user2", id: "s3", date: "2026-06-21T03:00:00Z", tool: "claude-code", turns: 5, usage: { in: 300, out: 30, cache_r: 0, cache_w: 0 } },
+  { space: "github__o__r", who: "user1", id: "s4", date: "2026-06-21T09:00:00Z", tool: "codex", turns: 1 }, // 无 usage（如老 Codex）
 ]);
 
 test("statsTruth: by=day 倒序（新→旧），coverage 标无用量条数", async () => {
@@ -113,7 +113,7 @@ test("statsTruth: 翻页 offset/limit + total + peak", async () => {
 
 test("statsTruth: by=person 按指标降序", async () => {
   const r = await statsTruth(TRUTH, { by: "person" });
-  assert.deepEqual(r.rows.map((x) => x.key), ["hank", "tqt"]);   // hank 440 > tqt 220
+  assert.deepEqual(r.rows.map((x) => x.key), ["user2", "user1"]);   // user2 440 > user1 220
   assert.equal(r.rows[0].tokens_total, 440);
   assert.equal(r.rows[0].sessions, 2);
 });
@@ -121,19 +121,19 @@ test("statsTruth: by=person 按指标降序", async () => {
 test("statsTruth: by 多选组合键（day,person）— 首维时间倒序、同段内指标降序", async () => {
   const r = await statsTruth(TRUTH, { by: "day,person" });
   assert.deepEqual(r.dims, ["day", "person"]);
-  // 06-21 段在前（新→旧）：hank(s3=330) > tqt(s4=0)；06-20 段：tqt(s2=220) > hank(s1=110)
+  // 06-21 段在前（新→旧）：user2(s3=330) > user1(s4=0)；06-20 段：user1(s2=220) > user2(s1=110)
   assert.deepEqual(r.rows.map((x) => x.key), [
-    "2026-06-21 · hank", "2026-06-21 · tqt", "2026-06-20 · tqt", "2026-06-20 · hank",
+    "2026-06-21 · user2", "2026-06-21 · user1", "2026-06-20 · user1", "2026-06-20 · user2",
   ]);
-  assert.deepEqual(r.rows[0].keys, ["2026-06-21", "hank"]);
+  assert.deepEqual(r.rows[0].keys, ["2026-06-21", "user2"]);
   assert.equal(r.rows[0].tokens_total, 330);
 });
 
 test("statsTruth: by 多选去重 + 首维非时间则全按指标降序", async () => {
   const r = await statsTruth(TRUTH, { by: "person,person,tool" });   // 去重 → person,tool
   assert.deepEqual(r.dims, ["person", "tool"]);
-  // 首维 person 非时间 → 全按指标降序：hank/cc 440 最高
-  assert.equal(r.rows[0].key, "hank · claude-code");
+  // 首维 person 非时间 → 全按指标降序：user2/cc 440 最高
+  assert.equal(r.rows[0].key, "user2 · claude-code");
   assert.equal(r.rows[0].tokens_total, 440);
 });
 
@@ -141,7 +141,7 @@ test("statsTruth: by=day split=person 二维", async () => {
   const r = await statsTruth(TRUTH, { by: "day", split: "person" });
   const d20 = r.rows.find((x) => x.key === "2026-06-20");
   const cells = Object.fromEntries(d20.cells.map((c) => [c.key, c.tokens_total]));
-  assert.deepEqual(cells, { hank: 110, tqt: 220 });
+  assert.deepEqual(cells, { user2: 110, user1: 220 });
 });
 
 test("statsTruth: since/until 按工作时间过滤", async () => {
@@ -164,11 +164,11 @@ test("statsTruth: 坏维度被拒", async () => {
 // 一条 06-20 23:00 起、06-21 02:00 止的 session：turns 1+3、token 100+300 分到两天（带 days[]）。
 function makeXDayTruth() {
   const dir = mkdtempSync(join(tmpdir(), "tb-stats-xday-"));
-  const abs = join(dir, "spaces", "github__o__r", "sessions", "main", "hank-x.md");
+  const abs = join(dir, "spaces", "github__o__r", "sessions", "main", "user2-x.md");
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, buildCard({
-    date: "2026-06-20T23:00:00Z", updated: "2026-06-21T02:00:00Z", producer_id: "hank",
-    submitter: "hank", tool: "claude-code", turns: 4, ...usageFields({ in: 400, out: 0, cache_r: 0, cache_w: 0 }),
+    date: "2026-06-20T23:00:00Z", updated: "2026-06-21T02:00:00Z", producer_id: "user2",
+    submitter: "user2", tool: "claude-code", turns: 4, ...usageFields({ in: 400, out: 0, cache_r: 0, cache_w: 0 }),
     ...daysFields([
       { date: "2026-06-20", turns: 1, in: 100, out: 0, cache_r: 0, cache_w: 0 },
       { date: "2026-06-21", turns: 3, in: 300, out: 0, cache_r: 0, cache_w: 0 },
@@ -195,7 +195,7 @@ test("statsTruth: by=day 把跨天 session 按天各归各天（不整条压开�
 
 test("statsTruth: 非时间维（person）整条算一条、不拆天", async () => {
   const r = await statsTruth(XTRUTH, { by: "person" });
-  assert.deepEqual(r.rows.map((x) => x.key), ["hank"]);
+  assert.deepEqual(r.rows.map((x) => x.key), ["user2"]);
   assert.equal(r.rows[0].turns, 4);            // 整条 = 4，不是某一天
   assert.equal(r.rows[0].tokens_total, 400);
   assert.equal(r.rows[0].sessions, 1);
@@ -210,11 +210,11 @@ test("statsTruth: since 落在跨天 session 中段 → 只算窗内那天", asy
 
 test("statsTruth: 区间跨窗但活跃天全在窗外 → 不计入 coverage/totals（无误导）", async () => {
   const dir = mkdtempSync(join(tmpdir(), "tb-stats-gap-"));
-  const abs = join(dir, "spaces", "github__o__r", "sessions", "main", "hank-g.md");
+  const abs = join(dir, "spaces", "github__o__r", "sessions", "main", "user2-g.md");
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, buildCard({   // work 区间 06-20~06-25，但只在 06-20 / 06-25 活跃
-    date: "2026-06-20T01:00:00Z", updated: "2026-06-25T01:00:00Z", producer_id: "hank",
-    submitter: "hank", tool: "claude-code", turns: 4, ...usageFields({ in: 400, out: 0, cache_r: 0, cache_w: 0 }),
+    date: "2026-06-20T01:00:00Z", updated: "2026-06-25T01:00:00Z", producer_id: "user2",
+    submitter: "user2", tool: "claude-code", turns: 4, ...usageFields({ in: 400, out: 0, cache_r: 0, cache_w: 0 }),
     ...daysFields([
       { date: "2026-06-20", turns: 1, in: 100, out: 0, cache_r: 0, cache_w: 0 },
       { date: "2026-06-25", turns: 3, in: 300, out: 0, cache_r: 0, cache_w: 0 },
@@ -228,11 +228,11 @@ test("statsTruth: 区间跨窗但活跃天全在窗外 → 不计入 coverage/to
 
 test("statsTruth: 老卡片（无 days）回退老口径 — 整条算开始日", async () => {
   const dir = mkdtempSync(join(tmpdir(), "tb-stats-olddays-"));
-  const abs = join(dir, "spaces", "github__o__r", "sessions", "main", "hank-o.md");
+  const abs = join(dir, "spaces", "github__o__r", "sessions", "main", "user2-o.md");
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, buildCard({   // 跨天但无 days 字段（未回填）
-    date: "2026-06-20T12:00:00Z", updated: "2026-06-21T14:00:00Z", producer_id: "hank",
-    submitter: "hank", tool: "claude-code", turns: 4, ...usageFields({ in: 400, out: 0, cache_r: 0, cache_w: 0 }),
+    date: "2026-06-20T12:00:00Z", updated: "2026-06-21T14:00:00Z", producer_id: "user2",
+    submitter: "user2", tool: "claude-code", turns: 4, ...usageFields({ in: 400, out: 0, cache_r: 0, cache_w: 0 }),
   }, "body"));
   const r = await statsTruth(dir, { by: "day" });
   assert.deepEqual(r.rows.map((x) => x.key), ["2026-06-20"]);   // 整条压到开始日（北京日）

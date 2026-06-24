@@ -12,7 +12,7 @@ spaces/
     sessions/<...>/<人>-<id>.{jsonl,md}
 ```
 
-每条 session 卡片（.md）的 frontmatter 带：`producer_id`（产生者，如 tqt）、`submitter`（提交者 git 名，如 taoqitian）、`space_key`、`branch`、`date`（首条消息=工作起）、`updated`（末次输入=工作止）。
+每条 session 卡片（.md）的 frontmatter 带：`producer_id`（产生者，如 user1）、`submitter`（提交者 git 名，如 username1）、`space_key`、`branch`、`date`（首条消息=工作起）、`updated`（末次输入=工作止）。
 
 ---
 
@@ -53,19 +53,19 @@ spaces/
 
 - **`grep(q, space?, context?, raw?)`** — 真相库正则全文搜，最常用的起手式。
   - `q` 支持正则：`q="融资|finance"`；`context` 上下文行(0–3，默认1)；`space` 收窄到某仓减噪声；`raw=true` 连 session 原文一起搜。
-  - 例：`grep(q="ontology", space="github__Asklear__bossa", context=2)`
+  - 例：`grep(q="ontology", space="github__Asklear__repo1", context=2)`
 
 - **`sessions(author?, space?, since?, until?, limit?)`** — **按【人 + 工作时间】检索 session（按人按时间首选）**。
-  - 时间维度是**真实工作时间**（非入库时间）；`author` 给 **producer-id 或 git 名都行**（`tqt` 与 `taoqitian` 等价、结果一致）。
+  - 时间维度是**真实工作时间**（非入库时间）；`author` 给 **producer-id 或 git 名都行**（`user1` 与 `username1` 等价、结果一致）。
   - 每条返回带 `work_start~work_end`（工作时间）+ `ingest_date`（入库时间）+ canonical 坐标（`path`/`space_key`/`branch`/`file`）+ 一行预览。
-  - 例：`sessions(author="tqt", since="2026-06-01", until="2026-06-07")` → 拿 `path` 再 `read` 深挖。
+  - 例：`sessions(author="user1", since="2026-06-01", until="2026-06-07")` → 拿 `path` 再 `read` 深挖。
 
-- **`find(name?, path?, limit?)`** — 按文件名 glob 找文件（`*.jsonl`、`hank-*`）。grep 搜内容、find 搜文件名，互补。
+- **`find(name?, path?, limit?)`** — 按文件名 glob 找文件（`*.jsonl`、`user2-*`）。grep 搜内容、find 搜文件名，互补。
 
 - **`ls(path?)`** — 看结构。不给 `path` → 列所有 space（空 space 标 `·仅登记(无session)`）；`path="spaces/<key>/sessions"` → 看分支。
 
 - **`log(space?, author?, since?, grep?, limit?)`** — 全队**入库**时间线（每次入库 = 一条 commit）。
-  - ⚠️ 时间 = **入库/commit 时间**，不是干活时间；`author` 匹配 **git 提交者名**（如 `taoqitian`，不是 producer-id `tqt`）。**按人按时间请优先 `sessions`。**
+  - ⚠️ 时间 = **入库/commit 时间**，不是干活时间；`author` 匹配 **git 提交者名**（如 `username1`，不是 producer-id `user1`）。**按人按时间请优先 `sessions`。**
   - 坐标已自动归一到现位置（owner 搬家也能直接 `read`）。
 
 ### 深挖类
@@ -80,7 +80,7 @@ spaces/
 
 ## 串起来用的几个套路
 
-1. **"某人上周/某段时间做了什么"**（最容易漏检）：`sessions(author="tqt", since=…, until=…)` → 对每条 `read(path)` 深挖。**别用 `log`+`since`**（那是入库时间，会漏会混）。
+1. **"某人上周/某段时间做了什么"**（最容易漏检）：`sessions(author="user1", since=…, until=…)` → 对每条 `read(path)` 深挖。**别用 `log`+`since`**（那是入库时间，会漏会混）。
 2. **"X 做到哪了"**：`grep(q="X")` 定位 → `read(...)` 读原委 → `read_github(space_key=...)` 看代码是否已固化。
 3. **"谁在搞 Y"**：`grep(q="Y")` 看命中里反复出现的人，或 `sessions(author=…)` → `read` 确认。
 4. **"最近真相库收进了啥"**：`log(since="7 days ago")` → 对感兴趣的条 `read`。

@@ -1,0 +1,28 @@
+# 别把这些进构建上下文：依赖现装、真相库/状态/密钥/日志不入镜像。
+node_modules
+.git
+.github
+
+# 真相库与运行态（容器用命名卷）
+truth
+truth-server
+.brain-state.json
+sync.log
+
+# 密钥 / 个人配置（容器在 /data/config 卷里自举，绝不烤进镜像）。
+# 注意：docker .dockerignore 不按层匹配，根级 tokens.yaml 盖不住 config/tokens.yaml → 整个 config/ 也排除。
+client.config.yaml
+tokens.yaml
+registry.yaml
+feishu.yaml
+team.yaml
+config
+**/tokens.yaml
+
+# 与服务端镜像无关的体积大头
+blog
+docs
+web/web-design.pen
+web/mockups
+web/fixtures
+**/.DS_Store

@@ -45,7 +45,28 @@
 
 **前置：** Node 22+；一个支持 MCP 的编辑器／CLI（Claude Code 或 Codex）用来提问。
 
-1. **起一台服务器**（一台小 VPS 即可）。按 [DEPLOY.md](./DEPLOY.md)：装 Node、clone、设 `TRUTH_DIR`、配花名册 + token、前面套 HTTPS、跑成常驻。
+### 先本地试一下（约 5 分钟——免 VPS、免 HTTPS、免邀请码）
+
+想正式起服务器前先尝尝鲜？整套东西可以在你自己机器上单人跑起来：
+
+```bash
+git clone https://github.com/Asklear/Klear-Team-Brain.git && cd Klear-Team-Brain
+npm install
+npm run quickstart        # 一次性：签发本地身份 + token，把客户端指向 localhost，接好 MCP
+npm run server            # 真相库服务跑在 http://127.0.0.1:8787 —— 这个终端别关，让它一直跑
+```
+
+然后**另开一个终端**收本机 session：
+
+```bash
+npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续盯着）
+```
+
+然后在编辑器里问，或打开 `http://127.0.0.1:8787/` 浏览。全程数据不出本机。想用容器起服务端？`docker compose up -d` 即可——见 [DEPLOY.md](./DEPLOY.md#docker)。
+
+### 给团队部署
+
+1. **起一台服务器**（一台小 VPS 即可）——手动，或用 `docker compose` 一条命令起。按 [DEPLOY.md](./DEPLOY.md)：装 Node、clone、设 `TRUTH_DIR`、配花名册 + token、前面套 HTTPS、跑成常驻。
 2. **每个成员接入客户端**——指向你的服务器：
    
    ```bash
@@ -70,6 +91,8 @@
 | `find`        | 按文件名/glob 找文件（和 grep 互补：一个搜内容、一个搜文件名）。                    |
 | `read`        | 按 path 读任意文件（大文件用 offset/limit 翻页）。                       |
 | `ls`          | 看结构：有哪些 space、分支、几条 session。                              |
+| `sessions`    | 按人 + 工作时间检索 session（某人某段时间干了啥）。                          |
+| `stats`       | 按 天/周/人/repo/工具 聚合 token 用量 / session 数 / 对话轮次。           |
 | `log`         | 活动时间线（git 历史；可按 space/author/since 收窄）。                   |
 | `read_github` | 出网现拉某仓代码状态或文件最新内容（代码本体不入库）。                               |
 

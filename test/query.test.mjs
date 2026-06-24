@@ -20,28 +20,28 @@ function gitTruth(files) {
 }
 
 const TRUTH = gitTruth([
-  "spaces/github__o__r/sessions/main/hank-s1.md",
-  "spaces/github__o__r/sessions/main/hank-s1.jsonl",
-  "spaces/local__hank/sessions/no-branch/hank-s2.md",
-  "spaces/local__hank/sessions/no-branch/lin-s3.md",
+  "spaces/github__o__r/sessions/main/user2-s1.md",
+  "spaces/github__o__r/sessions/main/user2-s1.jsonl",
+  "spaces/local__user2/sessions/no-branch/user2-s2.md",
+  "spaces/local__user2/sessions/no-branch/lin-s3.md",
 ]);
 
 test("findTruth: 按扩展名 glob", async () => {
   const r = await findTruth(TRUTH, { name: "*.jsonl" });
-  assert.deepEqual(r.files, ["spaces/github__o__r/sessions/main/hank-s1.jsonl"]);
+  assert.deepEqual(r.files, ["spaces/github__o__r/sessions/main/user2-s1.jsonl"]);
   const md = await findTruth(TRUTH, { name: "*.md" });
   assert.equal(md.files.length, 3);
 });
 
 test("findTruth: 按文件名前缀 glob", async () => {
-  const r = await findTruth(TRUTH, { name: "hank-s2*" });
-  assert.deepEqual(r.files, ["spaces/local__hank/sessions/no-branch/hank-s2.md"]);
+  const r = await findTruth(TRUTH, { name: "user2-s2*" });
+  assert.deepEqual(r.files, ["spaces/local__user2/sessions/no-branch/user2-s2.md"]);
 });
 
 test("findTruth: path 限定子目录", async () => {
-  const r = await findTruth(TRUTH, { path: "spaces/local__hank", name: "*.md" });
+  const r = await findTruth(TRUTH, { path: "spaces/local__user2", name: "*.md" });
   assert.equal(r.files.length, 2);
-  assert.ok(r.files.every((f) => f.startsWith("spaces/local__hank/")));
+  assert.ok(r.files.every((f) => f.startsWith("spaces/local__user2/")));
 });
 
 test("findTruth: name 含路径分隔符被拒（防穿越/越权）", async () => {

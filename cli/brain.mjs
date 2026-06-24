@@ -182,6 +182,19 @@ async function setup() {
   console.log(c.b("\n下一步：") + " brain service install  " + c.dim("（装后台常驻；或 brain start 前台试跑）\n"));
 }
 
+// ---------------- quickstart（本地单机自助接入：免 VPS/HTTPS/邀请码）----------------
+// 跑 scripts/quickstart.mjs 自举（花名册+token+客户端配置→localhost）→ 接 MCP。不在这里起 server/sync：
+// 服务端要用户自己 `npm run server` 起来（quickstart 末尾已提示），起好后再 sync 才传得上。
+function quickstart() {
+  const qs = join(ROOT, "scripts", "quickstart.mjs");
+  // quickstart 是「git clone 完整仓 → 本机起服务尝鲜」的玩法；brain join 装的轻量客户端包不含 scripts/server/，用不了。
+  if (!existsSync(qs)) die("brain quickstart 只在 git clone 的完整仓里可用（本地起服务尝鲜）。你这是接入已有服务器的客户端包——用 brain join / brain setup。");
+  const pass = process.argv.slice(3);                  // 透传 --server/--id/--name/--force 给 scripts/quickstart.mjs
+  const r = spawnSync(NODE, [qs, ...pass], { cwd: ROOT, stdio: "inherit" });
+  if (r.status !== 0) die("quickstart 自举失败");
+  addMcp();                                             // 接 Claude Code + Codex 的 MCP（指向本地 mcp/server.mjs → 读 client.config 打 localhost）
+}
+
 // ---------------- start（前台）----------------
 function start(once) {
   if (!existsSync(CFG)) die("还没配置，先跑 brain setup");
@@ -471,6 +484,7 @@ const [cmd, sub] = process.argv.slice(2);
 const flag = (f) => process.argv.includes(f);
 const HELP = `brain —— 团队大脑客户端
   brain join <邀请码> [--consume-only]   一键接入（管理员给你的码）
+  brain quickstart            本地单机自助接入（免 VPS/HTTPS/邀请码；配合 npm run server）
   brain setup                 手动配置（token / 工作空间 / 接 MCP）
   brain mcp                   （重新）接 Claude Code + Codex 的 MCP
   brain update                从服务器拉最新客户端代码 + 重启常驻
@@ -495,6 +509,7 @@ const HELP = `brain —— 团队大脑客户端
 try {
   switch (cmd) {
     case "join": await joinCmd(sub); break;
+    case "quickstart": quickstart(); break;           // 本地单机自助接入（免 VPS/HTTPS/邀请码）
     case "admin": adminCmd(sub, process.argv.slice(4)); break;
     case "mcp": addMcp(); break;                      // 按需（重新）接 Claude + Codex 的 MCP
     case "update": update({ restart: !process.argv.includes("--no-restart") }); break; // 拉最新客户端代码 + 重启常驻（--no-restart：只落盘，给采集器自动更新用）

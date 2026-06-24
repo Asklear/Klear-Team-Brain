@@ -8,6 +8,12 @@ This project follows [Semantic Versioning](https://semver.org/), formatted after
 
 ---
 
+## [0.1.17] - 2026-06-24 · Local trial + one-command Docker self-host
+
+### Added
+- **Try it locally in 5 minutes**: no server needed — after `git clone`, `npm run quickstart` runs the whole thing on your own machine as a single user (no VPS, no HTTPS, no invite token), so you can evaluate before deploying.
+- **One-command Docker self-host**: `docker compose up -d` brings up the server with a persistent truth store and an auto-minted token; `--profile tls` adds automatic HTTPS for a real domain. README and deploy docs updated with the steps.
+
 ## [0.1.16] - 2026-06-24 · Self-updating client
 
 ### Added

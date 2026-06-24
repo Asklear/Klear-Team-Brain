@@ -1,0 +1,43 @@
+# 自托管「项目大脑」服务端 —— 一键起。
+#   本地尝鲜 / 单机：     docker compose up -d              （服务在 http://localhost:8787）
+#   真域名上 HTTPS：      DOMAIN=brain.you.com docker compose --profile tls up -d
+#
+# 安全：server 端口默认只绑【回环】(127.0.0.1) —— 本机客户端可达、公网不可达。要给团队用就走 tls profile，
+# 由 Caddy 在 443 终止 HTTPS、内网转发到 server:8787（8787 永不出容器网络）。别把 8787 改成 0.0.0.0 裸暴露公网。
+services:
+  server:
+    build: .
+    image: klear-team-brain
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8787}:8787"   # 回环绑定：本机可达，公网不可达（公网访问走 tls profile 的 Caddy）。端口冲突就 HOST_PORT=8788 docker compose up
+    environment:
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost:8787}
+      - NO_POLL=${NO_POLL:-1}        # 1=不轮询（本地无 github/feishu 凭证）。要开代码态/文档镜像：设 0 + 在 ./config 放 registry.yaml/feishu.yaml
+      # - GITHUB_TOKEN=ghp_xxx       # 选配：填了开 read_github + code-state（只读 PAT）
+      # - BRAIN_ID=owner             # 首启自举成员的 id / 名（不填默认 owner/Owner）
+      # - BRAIN_NAME=Owner
+    volumes:
+      - truth:/data/truth            # git 真相库 —— 全部价值所在，持久化（别丢）
+      - ./config:/data/config        # 花名册/token/registry/feishu（容器首启会自举 team.yaml+tokens.yaml）
+    restart: unless-stopped
+
+  # 选配：给真域名上自动 HTTPS。启用：DOMAIN=brain.you.com docker compose --profile tls up -d
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    environment:
+      - DOMAIN=${DOMAIN:-}           # 用 tls profile 时必须设：DOMAIN=brain.you.com docker compose --profile tls up -d（空则 Caddy 启动会报错提示）
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [server]
+    restart: unless-stopped
+
+volumes:
+  truth:
+  caddy_data:
+  caddy_config:

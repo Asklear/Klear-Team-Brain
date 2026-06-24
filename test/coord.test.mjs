@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { parseRemote } from "../core/coord.mjs";
 
 test("parseRemote: git@ SSH 形式", () => {
-  assert.deepEqual(parseRemote("git@github.com:coldestlin/bossa.git"), {
-    host: "github.com", owner: "coldestlin", repo: "bossa",
+  assert.deepEqual(parseRemote("git@github.com:olduser1/repo1.git"), {
+    host: "github.com", owner: "olduser1", repo: "repo1",
   });
 });
 

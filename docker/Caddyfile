@@ -1,0 +1,5 @@
+# 反代 + 自动 HTTPS（仅 `--profile tls` 启用）。把真域名解析到本机后，Caddy 自动签 Let's Encrypt 证书，
+# 终止 TLS 后转发到内网的 server:8787 —— 8787 本身不出容器网络，token 不走明文。
+{$DOMAIN} {
+	reverse_proxy server:8787
+}

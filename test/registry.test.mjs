@@ -4,63 +4,63 @@ import { decideSpaceKey, isGitHubHost, loadRegistry, patFor, hasGithub, hasAnyRe
 
 const REG = {
   github: {
-    orgs: [{ org: "coldestlin", pat_ref: "p1" }],
-    repos: [{ owner: "haurhi", repo: "finance_qa", pat_ref: "p2" }],
+    orgs: [{ org: "olduser1", pat_ref: "p1" }],
+    repos: [{ owner: "olduser2", repo: "repo2", pat_ref: "p2" }],
   },
 };
 const gh = (owner, repo) => ({ host: "github.com", owner, repo });
 
 test("命中已登记 org → github space", () => {
-  const d = decideSpaceKey(REG, gh("coldestlin", "bossa"), "hank");
-  assert.equal(d.space_key, "github__coldestlin__bossa");
+  const d = decideSpaceKey(REG, gh("olduser1", "repo1"), "user2");
+  assert.equal(d.space_key, "github__olduser1__repo1");
   assert.equal(d.type, "github");
-  assert.equal(d.ref, "github/coldestlin/bossa");
-  assert.deepEqual(d.registered, { via: "org", org: "coldestlin" });
+  assert.equal(d.ref, "github/olduser1/repo1");
+  assert.deepEqual(d.registered, { via: "org", org: "olduser1" });
 });
 
 test("命中已登记单 repo → github space", () => {
-  const d = decideSpaceKey(REG, gh("haurhi", "finance_qa"), "hank");
-  assert.equal(d.space_key, "github__haurhi__finance_qa");
+  const d = decideSpaceKey(REG, gh("olduser2", "repo2"), "user2");
+  assert.equal(d.space_key, "github__olduser2__repo2");
   assert.deepEqual(d.registered, { via: "repo" });
 });
 
 test("有 GitHub remote 但未登记 → local（关键：杜绝随手 clone 冒出 space）", () => {
-  const d = decideSpaceKey(REG, gh("random", "repo"), "hank");
-  assert.equal(d.space_key, "local__hank");
+  const d = decideSpaceKey(REG, gh("random", "repo"), "user2");
+  assert.equal(d.space_key, "local__user2");
   assert.equal(d.type, "local");
-  assert.equal(d.person, "hank");
+  assert.equal(d.person, "user2");
 });
 
 test("非 GitHub host 即使 owner 撞上 org → local（决策 4 收窄）", () => {
-  const d = decideSpaceKey(REG, { host: "gitlab.com", owner: "coldestlin", repo: "bossa" }, "hank");
-  assert.equal(d.space_key, "local__hank");
+  const d = decideSpaceKey(REG, { host: "gitlab.com", owner: "olduser1", repo: "repo1" }, "user2");
+  assert.equal(d.space_key, "local__user2");
 });
 
 test("无 remote → local", () => {
-  assert.equal(decideSpaceKey(REG, null, "gee").space_key, "local__gee");
+  assert.equal(decideSpaceKey(REG, null, "user3").space_key, "local__user3");
 });
 
 test("字符串简写形式的 registry 也认", () => {
-  const reg = { github: { orgs: ["coldestlin"], repos: ["haurhi/finance_qa"] } };
-  assert.equal(decideSpaceKey(reg, gh("coldestlin", "x"), "h").type, "github");
-  assert.equal(decideSpaceKey(reg, gh("haurhi", "finance_qa"), "h").type, "github");
-  assert.equal(decideSpaceKey(reg, gh("haurhi", "other"), "h").type, "local");
+  const reg = { github: { orgs: ["olduser1"], repos: ["olduser2/repo2"] } };
+  assert.equal(decideSpaceKey(reg, gh("olduser1", "x"), "h").type, "github");
+  assert.equal(decideSpaceKey(reg, gh("olduser2", "repo2"), "h").type, "github");
+  assert.equal(decideSpaceKey(reg, gh("olduser2", "other"), "h").type, "local");
 });
 
 test("decideSpaceKey: moved 重定向 —— 客户端还指旧 owner，也落到现位置（Asklear）", () => {
   const reg = {
     github: { orgs: [{ org: "Asklear" }], repos: [] },
-    moved: [{ from: "coldestlin/bossa", to: "Asklear/bossa" }],
+    moved: [{ from: "olduser1/repo1", to: "Asklear/repo1" }],
   };
-  // 没改 remote 的客户端仍上报 coldestlin/bossa
-  const d = decideSpaceKey(reg, gh("coldestlin", "bossa"), "hank");
-  assert.equal(d.space_key, "github__Asklear__bossa");
+  // 没改 remote 的客户端仍上报 olduser1/repo1
+  const d = decideSpaceKey(reg, gh("olduser1", "repo1"), "user2");
+  assert.equal(d.space_key, "github__Asklear__repo1");
   assert.equal(d.type, "github");
   assert.deepEqual(d.registered, { via: "org", org: "Asklear" });
-  // 已改 remote 的客户端上报 Asklear/bossa → 同样结果
-  assert.equal(decideSpaceKey(reg, gh("Asklear", "bossa"), "hank").space_key, "github__Asklear__bossa");
+  // 已改 remote 的客户端上报 Asklear/repo1 → 同样结果
+  assert.equal(decideSpaceKey(reg, gh("Asklear", "repo1"), "user2").space_key, "github__Asklear__repo1");
   // 没在 moved/registry 里的旧仓 → 仍 local
-  assert.equal(decideSpaceKey(reg, gh("coldestlin", "other"), "hank").type, "local");
+  assert.equal(decideSpaceKey(reg, gh("olduser1", "other"), "user2").type, "local");
 });
 
 test("loadRegistry: 保留 moved 段", () => {
@@ -82,7 +82,7 @@ test("loadRegistry: 缺文件 → 空名单（不崩）", () => {
 const PATREG = {
   github: {
     orgs: [{ org: "myorg", pat: "ORG_PAT" }, "noPatOrg"],
-    repos: [{ owner: "haurhi", repo: "finance_qa", pat: "REPO_PAT" }, { owner: "pub", repo: "open" }],
+    repos: [{ owner: "olduser2", repo: "repo2", pat: "REPO_PAT" }, { owner: "pub", repo: "open" }],
   },
 };
 
@@ -92,7 +92,7 @@ test("patFor: org 一把覆盖其全部 repo", () => {
 });
 
 test("patFor: 单独登记的 repo 用自己那把", () => {
-  assert.equal(patFor(PATREG, "haurhi", "finance_qa", "FB"), "REPO_PAT");
+  assert.equal(patFor(PATREG, "olduser2", "repo2", "FB"), "REPO_PAT");
 });
 
 test("patFor: 没配 pat 的条目 → 回退全局", () => {
@@ -130,7 +130,7 @@ const MULTI = {
 };
 
 test("decideSpaceKey: gitlab 子组项目 → gitlab space（host 进 key、owner 拍平、真值看 owner/repo）", () => {
-  const d = decideSpaceKey(MULTI, { host: "gitlab.com", owner: "mygroup/sub", repo: "proj" }, "hank");
+  const d = decideSpaceKey(MULTI, { host: "gitlab.com", owner: "mygroup/sub", repo: "proj" }, "user2");
   assert.equal(d.space_key, "gitlab__gitlab.com__mygroup-sub__proj");
   assert.equal(d.type, "gitlab");
   assert.equal(d.provider, "gitlab");

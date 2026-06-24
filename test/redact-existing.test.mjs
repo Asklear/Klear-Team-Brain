@@ -17,31 +17,31 @@ function build() {
   initTruth(truth);
   const s = join(truth, "spaces");
   // 含密钥的文件
-  put(s, "github__Asklear__bossa", "main", "hank-secret",
+  put(s, "github__Asklear__repo1", "main", "user2-secret",
     JSON.stringify({ type: "session_meta", payload: { cwd: "/w" } }) + "\n" +
     JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text",
       text: "key 是 ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789，OPENAI_API_KEY=plainsecretvalue123" }] } }) + "\n");
   // 干净文件 → 应字节不动
-  put(s, "github__Asklear__bossa", "main", "hank-clean",
+  put(s, "github__Asklear__repo1", "main", "user2-clean",
     JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "改个小 bug" }] } }) + "\n");
   return truth;
 }
 
 test("redact-existing: 抹掉密钥、且每行仍是合法 JSON", () => {
   const truth = build();
-  const s = join(truth, "spaces", "github__Asklear__bossa", "sessions", "main");
-  const cleanBefore = readFileSync(join(s, "hank-clean.jsonl"), "utf8");
+  const s = join(truth, "spaces", "github__Asklear__repo1", "sessions", "main");
+  const cleanBefore = readFileSync(join(s, "user2-clean.jsonl"), "utf8");
 
   const r = redactExisting(truth, { apply: true });
 
   assert.equal(r.changed.length, 1, "只动含密钥的 1 个文件");
-  const after = readFileSync(join(s, "hank-secret.jsonl"), "utf8");
+  const after = readFileSync(join(s, "user2-secret.jsonl"), "utf8");
   assert.doesNotMatch(after, /ghp_ABCDEF/, "GitHub PAT 抹掉");
   assert.doesNotMatch(after, /plainsecretvalue123/, "赋值式值抹掉");
   assert.match(after, /REDACTED/, "出现占位符");
   for (const line of after.split("\n")) if (line.trim()) JSON.parse(line);   // 结构未破坏
   // 干净文件字节完全不变
-  assert.equal(readFileSync(join(s, "hank-clean.jsonl"), "utf8"), cleanBefore, "干净文件字节不动");
+  assert.equal(readFileSync(join(s, "user2-clean.jsonl"), "utf8"), cleanBefore, "干净文件字节不动");
 });
 
 test("redact-existing: 幂等 —— 二次跑无改动", () => {
@@ -53,9 +53,9 @@ test("redact-existing: 幂等 —— 二次跑无改动", () => {
 
 test("redact-existing: dry-run 不写盘", () => {
   const truth = build();
-  const s = join(truth, "spaces", "github__Asklear__bossa", "sessions", "main");
-  const before = readFileSync(join(s, "hank-secret.jsonl"), "utf8");
+  const s = join(truth, "spaces", "github__Asklear__repo1", "sessions", "main");
+  const before = readFileSync(join(s, "user2-secret.jsonl"), "utf8");
   const r = redactExisting(truth, { apply: false });
   assert.equal(r.changed.length, 1, "报告将动 1 个");
-  assert.equal(readFileSync(join(s, "hank-secret.jsonl"), "utf8"), before, "dry-run 不改盘");
+  assert.equal(readFileSync(join(s, "user2-secret.jsonl"), "utf8"), before, "dry-run 不改盘");
 });
