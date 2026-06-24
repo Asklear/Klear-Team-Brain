@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { slimRaw } from "../core/slim.mjs";
+import { redactJsonl } from "../core/redact.mjs";
 import { parseSessionText } from "../core/parse.mjs";
 
 const big = (n) => "x ".repeat(n);   // 含空格 → 不是 base64 大块，走字段截断
@@ -18,11 +19,22 @@ const codexRaw = [
   JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: "已完成 etl 改造，结论 X" } }),
 ].join("\n");
 
-test("codex: token_count 只留末条（统计用） / 去重 exec_command_end", () => {
+test("codex: token_count 同日只留末条（统计用） / 去重 exec_command_end", () => {
   const slim = slimRaw(codexRaw);
-  // token_count 每轮重发 → 只保留最后一条累计用量（给统计层），不再整丢
-  assert.equal(slim.split("\n").filter((l) => l.includes("token_count")).length, 1, "只留一条 token_count");
+  // token_count 每轮重发 → 同一北京日只保留当日最后一条累计（无时间戳的退化为单桶 → 一条）
+  assert.equal(slim.split("\n").filter((l) => l.includes("token_count")).length, 1, "无时间戳 → 一条 token_count");
   assert.doesNotMatch(slim, /exec_command_end/, "exec_command_end 去重丢");
+});
+
+test("codex: token_count 按北京日各留末条（跨天留多条，供 parse 按天作差）", () => {
+  const raw = [
+    JSON.stringify({ type: "session_meta", timestamp: "2026-06-20T02:00:00Z", payload: { cwd: "/w" } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-06-20T02:05:00Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100 } } } }),
+    JSON.stringify({ type: "event_msg", timestamp: "2026-06-20T03:00:00Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 200 } } } }), // 同北京日 → 覆盖
+    JSON.stringify({ type: "event_msg", timestamp: "2026-06-21T09:00:00Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 500 } } } }), // 次日 → 另留
+  ].join("\n");
+  const tc = slimRaw(raw).split("\n").filter((l) => l.includes("token_count"));
+  assert.equal(tc.length, 2, "两个北京日各留一条");
 });
 
 test("codex: 截 tool 输出但留头尾，留 function_call", () => {
@@ -114,4 +126,30 @@ test("redact: slimRaw 抹掉密钥/token，且不破坏 JSON 结构", () => {
   assert.match(slim, /OPENAI_API_KEY/, "键名保留，便于读懂上下文");
   // 每行仍是合法 JSON（赋值式只换右值、不吃键名）
   for (const line of slim.split("\n")) if (line.trim()) JSON.parse(line);
+});
+
+test("redactJsonl: 数值型 token 计数不被误抹（input_tokens/total_tokens 等大整数）", () => {
+  // Codex token_count：字段名含 "token"、累计值 ≥8 位。曾被 ASSIGN_JSONL 抹成 [REDACTED_SECRET] →
+  // 破坏 JSON → parseCodexText 整行跳过 → tokens 丢失（重度 Codex 用户统计显示 0）。
+  const line = JSON.stringify({
+    type: "event_msg",
+    payload: { type: "token_count", info: { total_token_usage: {
+      input_tokens: 12345678, cached_input_tokens: 98765432, output_tokens: 518591, total_tokens: 111629701,
+    } } },
+  });
+  const out = redactJsonl(line);
+  assert.doesNotMatch(out, /REDACTED/, "纯数值 token 计数不该被脱敏");
+  const o = JSON.parse(out);                                  // 仍是合法 JSON
+  assert.equal(o.payload.info.total_token_usage.input_tokens, 12345678);
+  assert.equal(o.payload.info.total_token_usage.total_tokens, 111629701);
+  // 经 parse 能抽出 usage（in = input - cached）
+  const s = parseSessionText(line + "\n" + JSON.stringify({ type: "event_msg", timestamp: "2026-06-12T00:00:00Z", payload: { type: "agent_message", message: "x" } }), "codex");
+  assert.equal(s.usage.out, 518591);
+});
+
+test("redactJsonl: 字符串型密钥仍照常脱敏，且不破坏 JSON", () => {
+  const line = JSON.stringify({ api_token: "abcdEFGH1234secretval", note: "ok" });
+  const out = redactJsonl(line);
+  assert.match(out, /REDACTED_SECRET/, "字母数字混合的密钥值仍要抹");
+  assert.doesNotThrow(() => JSON.parse(out));
 });

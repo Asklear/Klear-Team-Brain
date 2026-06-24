@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 import { readdirSync, statSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, relative } from "node:path";
 import { safeSegment, safeRelPath } from "../core/safe.mjs";
-import { fm, readUsage } from "../core/card.mjs";
+import { fm, readUsage, readDays } from "../core/card.mjs";
+import { localDay } from "../core/parse.mjs";
 import { canonicalSpaceKey, canonicalizeSubject, resolveAuthorQuery, authorMatches } from "../core/identity.mjs";
 
 const pexec = promisify(execFile);
@@ -210,7 +211,7 @@ export async function sessionsTruth(TRUTH, { author, space, since, until, limit 
     // 坐标用【真实落盘位置】；过滤按 canonical 比较（别名/历史 owner 也命中）
     if (wantSpace && canonicalSpaceKey(registry, f.space_key) !== wantSpace) continue;
     if (!authorMatches(resolved, { producerId: f.producer_id, author: f.author })) continue;
-    const ws = f.date.slice(0, 10), we = f.updated.slice(0, 10);
+    const ws = localDay(f.date), we = localDay(f.updated);   // 北京日（since/until 与 stats 同口径）
     if (sinceD && we < sinceD) continue;                  // 工作区间 [ws,we] 与查询窗不相交 → 排除
     if (untilD && ws > untilD) continue;
     rows.push({
@@ -230,6 +231,8 @@ export async function sessionsTruth(TRUTH, { author, space, since, until, limit 
 // stats：全队【聚合统计】——把每条 session 卡片 frontmatter 的数值字段（tokens_*/turns）按维度 group-by 求和。
 // 设计同 sessions/spaceStats：现读卡片头部（headOf 走 mtime 缓存，便宜）、零落盘索引（守"视图可重建"不变量）。
 // ⚠️ 时间维（day/week）走【工作时间】（卡片 date~updated），不是入库时间——与 sessions 一致，与 log 相反。
+//    且按天拆：跨多天的 session 据卡片 days[] 把 turns/token 各归各天（哪天干的算哪天），不再整条压到开始日。
+//    days 缺失的老卡片（未回填）回退老口径（整条算开始日）；Codex 的 token 拆不到天 → 整条记开始日（tokens_daily=start）。
 // 通用性：by/split 任选维度、metric 任选指标 → 一个原语答"每天多少 token / 各项目几条 session / 谁轮次最多"等。
 //   维度 by/split ∈ day|week|person|space|tool；指标 metric ∈ tokens|tokens_io|tokens_in|tokens_out|cache|sessions|turns。
 //   by 可【多选】（逗号串/数组）→ 组合键分组（如 by="day,person" = 每天每人一行，key="2026-06-22 · hank"）。
@@ -266,8 +269,8 @@ function isoWeekStart(dateStr) {
 }
 function dimVal(dim, f, registry) {
   switch (dim) {
-    case "day": return f.work_start.slice(0, 10);
-    case "week": return isoWeekStart(f.work_start);
+    case "day": return localDay(f.work_start);
+    case "week": return isoWeekStart(localDay(f.work_start));
     case "person": return f.producer_id || f.author || "?";
     case "space": return canonicalSpaceKey(registry, f.space_key);
     case "tool": return f.tool || "?";
@@ -288,10 +291,14 @@ export async function statsTruth(TRUTH, { by = "day", split, metric = "tokens", 
   const wantTool = tool ? String(tool).toLowerCase() : null;
   const sinceD = since ? String(since).slice(0, 10) : null;
   const untilD = until ? String(until).slice(0, 10) : null;
+  // 有时间维（by 或 split 含 day/week）才需要按天拆片；否则整条 session 算一片（person/space/tool 不关心是哪天）。
+  const isTimeDim = (d) => d === "day" || d === "week";
+  const dayDim = (d, date) => (d === "week" ? isoWeekStart(date) : date);
+  const hasTimeDim = byDims.some(isTimeDim) || (split && isTimeDim(split));
 
   const groups = new Map();                                     // 维度键 → { total: agg, cells: Map(splitKey→agg) }
   const totals = newAgg();
-  let scanned = 0, withUsage = 0;
+  let scanned = 0, withUsage = 0;                               // scanned = 真正贡献了切片的 distinct session 数（跨天也只数一次）
   for (const mdPath of walkMd(join(TRUTH, "spaces"))) {
     const rel = relative(TRUTH, mdPath);
     if (!rel.includes("/sessions/")) continue;                  // 只看 session 卡片
@@ -302,21 +309,30 @@ export async function statsTruth(TRUTH, { by = "day", split, metric = "tokens", 
       producer_id: fm(head, "producer_id"), author: fm(head, "submitter") || fm(head, "producer"),
       tool: fm(head, "tool"), turns: Number(fm(head, "turns")) || 0,
       space_key: rel.split("/")[1] || "", usage: readUsage(head),
+      days: hasTimeDim ? readDays(head) : null,                 // 仅时间维需要按天拆片，省去无谓解析
     };
     if (wantSpace && canonicalSpaceKey(registry, f.space_key) !== wantSpace) continue;
     if (!authorMatches(resolved, { producerId: f.producer_id, author: f.author })) continue;
     if (wantTool && (f.tool || "").toLowerCase() !== wantTool) continue;
-    const ws = f.work_start.slice(0, 10), we = f.work_end.slice(0, 10);
+    const ws = localDay(f.work_start), we = localDay(f.work_end);   // 北京日（与 days[] 分桶、since/until 同口径）
     if (sinceD && we < sinceD) continue;                         // 工作区间与查询窗不相交 → 排除
     if (untilD && ws > untilD) continue;
-    scanned++; if (f.usage) withUsage++;
-    const keys = byDims.map((d) => dimVal(d, f, registry));     // 各维取值 → 组合键
+    // 有时间维且卡片带 days[] → 按天拆成多片（各天只取落在查询窗内的）；否则整条算一片（含未回填的老卡片）。
+    const slices = (hasTimeDim && f.days)
+      ? f.days.filter((e) => (!sinceD || e.date >= sinceD) && (!untilD || e.date <= untilD))
+      : [{ date: ws, turns: f.turns, usage: f.usage }];
+    if (!slices.length) continue;                                // 区间相交但活跃天全在窗外 → 不计入（含 coverage）
+    scanned++; if (f.usage) withUsage++;                         // 真正贡献了切片才计入 coverage，与 totals 口径一致
+    for (const slice of slices) {                                // 跨天 session 的每一天各归各的桶
+    const keys = byDims.map((d) => (isTimeDim(d) ? dayDim(d, slice.date) : dimVal(d, f, registry)));   // 各维取值 → 组合键
     const gk = keys.join("");                             // map 唯一键（用控制符分隔，避免值里有 · 撞键）
     let g = groups.get(gk); if (!g) groups.set(gk, g = { keys, total: newAgg(), cells: new Map() });
-    addToAgg(g.total, f);
-    if (split) { const sk = dimVal(split, f, registry); let c = g.cells.get(sk); if (!c) g.cells.set(sk, c = newAgg()); addToAgg(c, f); }
-    addToAgg(totals, f);
+    addToAgg(g.total, slice);
+    if (split) { const sk = isTimeDim(split) ? dayDim(split, slice.date) : dimVal(split, f, registry); let c = g.cells.get(sk); if (!c) g.cells.set(sk, c = newAgg()); addToAgg(c, slice); }
+    addToAgg(totals, slice);
+    }
   }
+  totals.sessions = scanned;                                     // 拆片会让 totals.sessions 被多天重复 +1 → 用 distinct(scanned) 纠回
 
   let rows = [...groups.values()].map((g) => ({
     key: g.keys.join(" · "), keys: g.keys, ...g.total,           // key=展示串、keys=各维原值（客户端按维度各自标注）

@@ -14,4 +14,7 @@ export const CLIENT_VERSION = v;
 // 客户端把它存进 .brain-state.json；升级后若发现存档代次更低，会一次性重收受影响的历史（见 sync.mjs reconcilePipeline）。
 //   1 → 初代。
 //   2 → slim 保留 Codex token_count（之前整丢）→ 重收 Codex 历史以补回 token 用量统计。
-export const PIPELINE_VERSION = 2;
+//   3 → ① redact 不再误伤数值型 token 计数（input_tokens 等 ≥8 位曾被抹成 [REDACTED_SECRET]、还破坏 JSON →
+//        重度 Codex 用户 token 统计为 0）；② slim 每北京日留末条 token_count、parse 作差 → Codex token 按天精确。
+//        两者都只能从本机原文捞回 → 重收 Codex 历史。
+export const PIPELINE_VERSION = 3;

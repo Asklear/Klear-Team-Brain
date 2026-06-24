@@ -194,7 +194,9 @@ function start(once) {
 // ---------------- update（从服务器拉最新客户端代码 + 重启常驻）----------------
 // 服务器的 /client.tgz 只含代码（core/client/mcp/cli + 精简 package.json，无 lark），不含 client.config.yaml/状态，
 // 所以解压覆盖到 ROOT 不会动你的 token/配置/已上传记录。比重跑 curl|bash 干净：不重做 MCP/PATH 那些一次性步骤。
-function update() {
+// 把服务器最新客户端代码落盘（下载 + 解压覆盖 + 装依赖），不碰常驻。
+// 拆出来给两处共用：手动 `brain update`（落盘后再重启）与采集器自动更新（落盘后自己退出、让常驻管理器以新代码拉起，避开重启竞态）。
+function applyUpdate() {
   // 安全闸：ROOT 是 git 仓 = 开发 checkout（不是 ~/.team-brain 装机目录）→ 解压会覆盖你的源码改动，拦住。
   if (existsSync(join(ROOT, ".git")))
     die(`这里是 git 开发仓（${ROOT}），brain update 会用服务器代码覆盖它。要更新真实安装请到 ~/.team-brain 跑，或忽略本命令。`);
@@ -215,9 +217,18 @@ function update() {
   sh("npm", ["prune", "--silent", "--omit=dev"], { cwd: ROOT });
   sh("chmod", ["+x", join(ROOT, "cli", "brain.mjs")]);
   console.log(c.ok("✓ 客户端代码已更新"));
-  // 重启常驻让 sync 用上新代码（没装常驻就提示怎么起）
-  if (IS_MAC ? existsSync(PLIST) : existsSync(UNIT)) serviceRestart();
-  else console.log(c.dim("（常驻未装：brain service install 起它）"));
+}
+
+// 服务器的 /client.tgz 只含代码（core/client/mcp/cli + 精简 package.json，无 lark），不含 client.config.yaml/状态，
+// 所以解压覆盖到 ROOT 不会动你的 token/配置/已上传记录。比重跑 curl|bash 干净：不重做 MCP/PATH 那些一次性步骤。
+// restart=false：只落盘不重启（采集器自动更新走它——落盘后采集器自己退出，由 launchd/systemd 以新代码拉起，避开重启竞态）。
+function update({ restart = true } = {}) {
+  applyUpdate();
+  if (restart) {
+    // 重启常驻让 sync 用上新代码（没装常驻就提示怎么起）
+    if (IS_MAC ? existsSync(PLIST) : existsSync(UNIT)) serviceRestart();
+    else console.log(c.dim("（常驻未装：brain service install 起它）"));
+  }
   console.log(c.ok("✓ brain update 完成") + c.dim("（编辑器里的 MCP 会在下次重开会话时用上新代码）"));
 }
 
@@ -486,7 +497,7 @@ try {
     case "join": await joinCmd(sub); break;
     case "admin": adminCmd(sub, process.argv.slice(4)); break;
     case "mcp": addMcp(); break;                      // 按需（重新）接 Claude + Codex 的 MCP
-    case "update": update(); break;                   // 拉最新客户端代码 + 重启常驻
+    case "update": update({ restart: !process.argv.includes("--no-restart") }); break; // 拉最新客户端代码 + 重启常驻（--no-restart：只落盘，给采集器自动更新用）
     case "setup": await setup(); break;
     case "start": start(flag("--once")); break;
     case "service":

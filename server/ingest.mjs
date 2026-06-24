@@ -4,7 +4,7 @@ import { join, relative, dirname } from "node:path";
 import { writeFileSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { parseSessionText } from "../core/parse.mjs";
 import { projectSession } from "../core/project.mjs";
-import { buildCard, usageFields } from "../core/card.mjs";
+import { buildCard, usageFields, daysFields } from "../core/card.mjs";
 import { safeSegment } from "../core/safe.mjs";
 import { decideSpaceKey } from "../core/registry.mjs";
 import { log } from "../core/log.mjs";
@@ -49,6 +49,7 @@ export async function ingest(truthDir, payload, submitter, registry) {
     folder: folderTag || undefined,            // 仅 local session 带 folder 标签
     date: s.ts, updated: s.updated || s.ts, turns: s.turns, raw: `${base}.jsonl`,
     ...usageFields(s.usage),                    // token 用量（tokens_in/out/cache_r/cache_w/total）；无则略过
+    ...daysFields(s.days, s.tokensDaily),       // 按天明细（days + tokens_daily）；统计层按天拆片用，无则略过
   }, projectSession(raw, tool));
   writeFileSync(mdAbs, card);
 

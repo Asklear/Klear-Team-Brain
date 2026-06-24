@@ -26,6 +26,8 @@ export const redact = (s) => RULES.reduce((a, [re, to]) => a.replace(re, to), s 
 // （GENERIC_RULE 会连键名带分隔符一起吃掉，用在 JSONL 上会把 {"k":"v"} 改成非法 JSON）。
 // 覆盖 shell(export FOO=…) / yaml(foo: …) / json("foo":"…") / .env；值字符类排除 空白/引号/反斜杠/括号
 // → 在 JSON 转义文本里遇到收尾的 \" 即停，也不会二次吞掉刚生成的占位符。值≥8 字符才动（压低误伤）。
+// 第 2 组捕获【值】：纯数字值放行（密钥必含字母；而 Codex token_count 的 input_tokens/total_tokens 等
+// 字段名含 "token"、累计值常 ≥8 位 → 不放行会把 token 计数抹成 [REDACTED_SECRET]，还破坏 JSON 行）。
 const ASSIGN_JSONL = /(["']?\b[\w.-]*(?:secret|token|passwd|password|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret|credential)[\w.-]*["']?\s*[:=]\s*\\?["']?)([^\s"'`,;)\\\[\]{}]{8,})/gi;
 // URL 内嵌凭据 scheme://user:pass@host → 只抹 pass，保留 scheme/user/host（够看出连了哪）。字符类排引号/反斜杠 → 不越 JSON 串。
 const URL_CRED = /([a-z][a-z0-9+.-]*:\/\/[^\s:@/"'`\\]+):([^\s:@/"'`\\]+)@/gi;
@@ -34,7 +36,7 @@ const URL_CRED = /([a-z][a-z0-9+.-]*:\/\/[^\s:@/"'`\\]+):([^\s:@/"'`\\]+)@/gi;
 // 目的：真相库的 .jsonl 原文本身就不含密钥——不再只靠派生 .md / 读出口（redactReadable）兜底；完整原文留产出者本机。
 export const redactJsonl = (s) =>
   PREFIX_RULES.reduce((a, [re, to]) => a.replace(re, to), String(s || ""))
-    .replace(ASSIGN_JSONL, (_m, head) => head + "[REDACTED_SECRET]")
+    .replace(ASSIGN_JSONL, (m, head, val) => (/^[\d.]+$/.test(val) ? m : head + "[REDACTED_SECRET]"))
     .replace(URL_CRED, (_m, head) => head + ":[REDACTED_SECRET]@");
 
 // 把本机家目录路径抹成 ~（agent 配置里满是机器级绝对路径，跨人/入库前必须中和）。

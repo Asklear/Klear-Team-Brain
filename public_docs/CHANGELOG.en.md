@@ -8,6 +8,18 @@ This project follows [Semantic Versioning](https://semver.org/), formatted after
 
 ---
 
+## [0.1.16] - 2026-06-24 · Self-updating client
+
+### Added
+- **Self-updating client**: the resident collector checks once a day and, when the server has a newer client, updates itself and restarts on the new code — no more manual `brain update`. On by default; can be disabled in config (`auto_update: false`).
+- **Trae session memory capture**: native session memory produced while working in [Trae](https://www.trae.ai/) now lands in the memory too (on by default, still gated to `upload_folders`).
+
+### Changed
+- **Stats counted on the day the work happened**: sessions spanning multiple days are no longer attributed entirely to their start day, but split by actual workday; daily bucketing consistently uses Beijing time (UTC+8).
+
+### Fixed
+- **Fixed token usage showing 0 for heavy Codex users**: redaction had been clobbering Codex's numeric token counters; usage is now accurate and split precisely by day. History is backfilled automatically from the originals on your machine after upgrading.
+
 ## [0.1.15] - 2026-06-23 · Easier capture, secrets never leave, lighter client
 
 ### Added

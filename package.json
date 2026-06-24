@@ -1,6 +1,6 @@
 {
   "name": "klear-team-brain",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "type": "module",
   "description": "Self-hosted team memory for AI coding agents — fuses Claude Code/Codex sessions, GitHub code state, and team docs into one git truth store, queryable from your editor over MCP.",
   "license": "Apache-2.0",

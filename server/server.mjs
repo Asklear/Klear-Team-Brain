@@ -14,6 +14,7 @@ import { loadRegistry, hasAnyRemote } from "../core/registry.mjs";
 import { clientFor, ctxFor } from "../core/repohost.mjs";
 import { redactReadable } from "../core/redact.mjs";
 import { log } from "../core/log.mjs";
+import { CLIENT_VERSION } from "../core/version.mjs";   // 服务器自身版本 == 打进 /client.tgz 的版本（启动重打包）→ 权威「最新客户端版本」
 import { safeSegment, safeRelPath } from "../core/safe.mjs";
 import { loadFeishu, makeReq } from "../core/feishu.mjs";
 import { initTruth } from "./gitstore.mjs";
@@ -242,6 +243,9 @@ const server = http.createServer((req, res) => {
 async function handle(req, res, u) {
   // --- 健康检查 ---
   if (req.method === "GET" && u.pathname === "/health") return json(res, 200, { ok: true });
+
+  // --- 最新客户端版本（无需鉴权，版本号非机密）：采集器每天自检，比本机高就自动更新 ---
+  if (req.method === "GET" && u.pathname === "/version") return json(res, 200, { version: CLIENT_VERSION });
 
   // --- 真相层 Web GUI（静态资源，无密钥、无需鉴权；背后的数据接口仍需 token）---
   // 根路径回 index.html；带已知扩展名的请求映射到 web/ 下的文件（路径穿越靠 safeRelPath 兜底）。

@@ -17,6 +17,10 @@ exclude:
 
 codex: true         # 是否也采集 ~/.codex/sessions（用 Codex 干活的；不用 Codex 设 false 无所谓）
 session_history_md: true  # 是否采集 upload_folders 内 session_history/**/*.md（默认开；设 false 关闭）
+trae_memory: true   # 是否采集 Trae 原生 ~/.trae-cn/memory/projects/<工作区slug>/**/session_memory_*.jsonl（默认开；只采 upload_folders 范围内）
+# trae_memory_projects:
+#   - /Users/you/Documents/Code/your-team-stuff  # 显式指定 Trae 工作区路径；必须在 upload_folders 下
+#   - -Users-you-Documents-Code-your-team-stuff  # 也可直接填 slug；必须能对应某个 upload_folders
 interval_sec: 60    # 多久扫一次
 debounce_sec: 60    # session 空闲多少秒才算"稳定"、才上传
 # 注：M3 起只采集 session。文档迁飞书（不再有 docs/agentdocs/vault 配置）；

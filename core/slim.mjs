@@ -9,6 +9,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { redactJsonl } from "./redact.mjs";
+import { localDay } from "./parse.mjs";
 
 const KB = 1024;
 // 图片/裸 base64 大块：文本级先剥（不必 JSON.parse 巨行，省内存；也顺带清掉 reasoning 的 encrypted blob）
@@ -35,7 +36,7 @@ function capDeep(v, head, tail) {
 
 // ---- Codex ----
 // token_count 不在这丢：它每轮重发（噪声）但带 session 累计 token 用量（统计要用）→
-// slimRaw 单独处理：丢掉中间所有重复，只留【最后一条】累计（见下）。
+// slimRaw 单独处理：丢掉中间重复，按【北京日】各留当日最后一条累计快照（见 feedLine/finish）。
 const CODEX_DROP_EVENT = new Set([
   "exec_command_end",            // 与 response_item/function_call_output 重复（同命令输出存两遍）
   "exec_command_output_delta",   // 流式增量块，重复
@@ -94,7 +95,7 @@ function slimCC(o) {
 }
 
 // 单行蒸馏：图片/base64 文本级先剥（不必 JSON.parse 巨行）→ 按记录类型做减法。
-// out 收蒸馏后行；state.lastTokenCount 跨行累计（Codex token_count 每轮重发，只留末条）。
+// out 收蒸馏后行；state.tokenCountByDay 按北京日留 Codex token_count 末条快照（每轮重发，按天去重）。
 // 拆出来让整文本(slimRaw)和流式逐行(slimRawFile)共用同一套减法，逐行处理与整文处理等价
 //（JSONL 单条记录不跨行，IMG/B64 strip 按行做结果一致）。
 function feedLine(line, out, state) {
@@ -104,21 +105,24 @@ function feedLine(line, out, state) {
     .replace(B64_RUN, (m) => `[blob ${human(m.length)} omitted]`);
   let o; try { o = JSON.parse(stripped); } catch { out.push(capStr(stripped, ARG_HEAD, ARG_TAIL)); return; } // 坏行也别无限长
   const isCodex = o && typeof o === "object" && o.payload && typeof o.payload === "object";
-  if (isCodex && o.type === "event_msg" && o.payload.type === "token_count") { state.lastTokenCount = o; return; }
+  // token_count 每轮重发（噪声），但带 session 累计用量。按【北京日】留每日最后一条累计快照
+  //（而非整条只留末条）→ parse 对相邻日快照作差得每日消耗，Codex token 也能按天精确（见 parseCodexText）。
+  if (isCodex && o.type === "event_msg" && o.payload.type === "token_count") { state.tokenCountByDay.set(localDay(o.timestamp) || "_", o); return; }
   const r = isCodex ? slimCodex(o) : slimCC(o);
   if (r === null) return;                     // 整条丢
   out.push(JSON.stringify(r));
 }
 
 function finish(out, state) {
-  if (state.lastTokenCount) out.push(JSON.stringify(state.lastTokenCount)); // 末尾补回累计用量（一条、极小；位置不影响 transcript）
+  // 每北京日末条 token_count 按日序补回（每活跃日一条、极小；位置不影响 transcript）
+  for (const day of [...state.tokenCountByDay.keys()].sort()) out.push(JSON.stringify(state.tokenCountByDay.get(day)));
   // 上传前最后一步：抹密钥/token（保 JSON 结构）→ 真相库 .jsonl 不含密钥，完整原文留本机。
   return redactJsonl(out.join("\n")) + "\n";
 }
 
 // raw jsonl 文本 → 蒸馏后的 jsonl 文本。
 export function slimRaw(raw) {
-  const out = [], state = { lastTokenCount: null };
+  const out = [], state = { tokenCountByDay: new Map() };
   for (const line of String(raw || "").split("\n")) feedLine(line, out, state);
   return finish(out, state);
 }
@@ -129,7 +133,7 @@ export function slimRaw(raw) {
 // 注意：单条 JSONL 记录仍逐行读成字符串，极端单行超大(>几百MB)仍可能吃内存，但 rollout 是每事件一行、单行有界。
 export async function slimRawFile(file) {
   const rl = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
-  const out = [], state = { lastTokenCount: null };
+  const out = [], state = { tokenCountByDay: new Map() };
   try { for await (const line of rl) feedLine(line, out, state); } finally { rl.close(); }
   return finish(out, state);
 }

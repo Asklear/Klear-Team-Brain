@@ -9,7 +9,7 @@ feishu.yaml
 github.token
 *.local.*
 
-sync.log
+sync*.log
 .brain-state.json
 
 # 飞书 PoC 凭证

@@ -9,6 +9,7 @@ const tidy = (t) => String(t).replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").re
 export function transcript(content, cap = 20000, tool) {
   const kind = tool || detectTool(content);
   const out = kind === "session-history-md" ? sessionHistoryLines(content)
+    : kind === "trae-session-memory" ? traeSessionMemoryLines(content)
     : kind === "codex" ? codexLines(content) : claudeLines(content);
   let s = out.join("\n\n");
   if (s.length > cap) s = s.slice(0, cap) + "\n\n…（已截断，全文更长）";
@@ -72,4 +73,21 @@ function sessionHistoryLines(content) {
     }
   }
   return content.trim() ? [content] : [];
+}
+
+function traeSessionMemoryLines(content) {
+  const out = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    const chunks = [];
+    if (o.intent) chunks.push(`**意图**：${tidy(o.intent)}`);
+    if (Array.isArray(o.actions) && o.actions.length) chunks.push(`**动作**：\n${o.actions.map((x) => `- ${tidy(x)}`).join("\n")}`);
+    if (o.outcome) chunks.push(`**结果**：${tidy(o.outcome)}`);
+    if (Array.isArray(o.learned) && o.learned.length) chunks.push(`**沉淀**：\n${o.learned.map((x) => `- ${tidy(x)}`).join("\n")}`);
+    const when = o.message_summary_time || o.timestamp || o.updated_at;
+    if (when) chunks.push(`**时间**：${when}`);
+    if (chunks.length) out.push(chunks.join("\n\n"));
+  }
+  return out;
 }
