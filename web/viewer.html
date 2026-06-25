@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Brain · Local Console</title>
+<style>
+  :root{
+    --bg:#fbfbf9; --surface:#fff; --surface-side:#f7f6f1; --surface-sunk:#f1f0ea; --surface-chip:#eceae3;
+    --ink:#1a1a17; --ink-prose:#3a3833; --muted:#6e6b63; --muted-soft:#8b8880; --faint:#a09c93;
+    --line:#e7e5df; --line-soft:#efeee8;
+    --green:#15803d; --green-08:#15803d12; --green-05:#15803d0a; --amber:#b45309; --red:#c0392b;
+    --font-mono:"Geist Mono","JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --font-sans:"Geist",Inter,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --r-chip:5px; --r-md:7px; --r-lg:10px; --r-full:999px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-mono);font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  svg.ic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  code{font-family:var(--font-mono)}
+  /* ribbon */
+  .ribbon{background:var(--ink);color:#edece7;display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:36px;font-size:11.5px}
+  .ribbon .l{display:flex;align-items:center;gap:8px;min-width:0} .ribbon .l>svg{width:14px;height:14px;stroke:#7ee2a1}
+  .ribbon b{color:#fff;font-weight:600} .ribbon .host{color:#928e85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ribbon .r{display:flex;align-items:center;gap:5px;color:#928e85;white-space:nowrap} .ribbon .r a{color:#c3bfb6;text-decoration:none} .ribbon .r a:hover{color:#fff} .ribbon .r svg{width:12px;height:12px;stroke:#928e85}
+  /* layout */
+  .app{display:grid;grid-template-columns:228px 1fr;min-height:calc(100vh - 36px)}
+  .side{background:var(--surface-side);border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:3px}
+  .brand{font-size:13px;font-weight:600;margin:0 8px 18px;letter-spacing:.2px} .brand small{display:block;color:var(--muted-soft);font-weight:400;font-size:11px;margin-top:4px}
+  .nav a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r-md);color:var(--muted);text-decoration:none;cursor:pointer} .nav a svg{width:15px;height:15px;stroke:var(--muted-soft)}
+  .nav a .lbl{flex:1} .nav a .n{font-size:11px;color:var(--faint)} .nav a:hover{background:#edeae2}
+  .nav a.on{background:var(--green-08);color:var(--green);font-weight:600} .nav a.on svg{stroke:var(--green)} .nav a.on .n{color:var(--green)}
+  .side-foot{margin-top:auto;color:var(--muted-soft);font-size:11px;padding:12px 8px 0;border-top:1px solid var(--line);line-height:2}
+  .side-foot .ln{display:flex;align-items:center;gap:7px} .side-foot .ln svg{width:13px;height:13px} .run{stroke:var(--green)}
+  .side-foot .ver{padding-left:20px;color:var(--faint)}
+  .langtog{margin-top:10px;background:none;border:1px solid var(--line);border-radius:var(--r-md);color:var(--muted);font-family:inherit;font-size:11px;padding:5px 10px;cursor:pointer;width:100%} .langtog:hover{background:#edeae2;color:var(--ink)}
+  /* main */
+  .main{padding:30px 36px;max-width:1000px}
+  h1{font-family:var(--font-sans);font-size:22px;font-weight:600;margin:0 0 5px;letter-spacing:-.2px}
+  .sub{color:var(--muted);margin:0 0 26px;font-size:12.5px}
+  .page{display:none} .page.on{display:block}
+  .sech{display:flex;align-items:center;gap:7px;font-size:10.5px;letter-spacing:1.4px;color:var(--faint);text-transform:uppercase;margin:30px 0 12px} .sech svg{width:13px;height:13px;stroke:var(--faint)}
+  .sech .x{letter-spacing:0;text-transform:none;color:var(--muted-soft)}
+  /* what-card */
+  .what{display:flex;gap:13px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:15px 17px;margin-bottom:22px}
+  .what>svg{width:17px;height:17px;stroke:var(--green);margin-top:1px} .what .tx{font-size:12.5px;color:var(--ink-prose);line-height:1.75} .what .tx b{color:var(--ink)} .what .tx .g{color:var(--green);font-weight:600}
+  /* headline */
+  .headline{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px 24px;margin-bottom:12px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+  .headline .big{font-size:36px;font-weight:600;color:var(--green);font-family:var(--font-sans);line-height:1} .headline .cap{font-size:13.5px;color:var(--ink-prose);line-height:1.55} .headline .cap .d{color:var(--muted-soft);font-size:12px} .headline .small{color:var(--muted-soft);font-size:12px;margin-left:auto;text-align:right;line-height:1.6}
+  .ok{color:var(--muted);font-size:12.5px;padding:4px 2px}
+  /* table */
+  table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+  th{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);text-align:left;font-weight:500;padding:11px 16px;border-bottom:1px solid var(--line)}
+  td{padding:13px 16px;border-bottom:1px solid var(--line-soft);font-size:12.5px;vertical-align:middle} tr:last-child td{border-bottom:none}
+  tbody tr{cursor:pointer} tbody tr:hover{background:var(--green-05)}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:var(--r-chip);font-size:11px;font-weight:600;white-space:nowrap} .badge svg{width:12px;height:12px;stroke-width:2}
+  .b-up{background:var(--green-08);color:var(--green)} .b-wait{background:#eef1f4;color:#3b5566}
+  .intent{color:var(--ink-prose)} .meta{color:var(--muted-soft);font-size:11.5px} .tool{color:var(--muted)}
+  /* log */
+  .log{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+  .logline{display:flex;gap:13px;padding:9px 16px;border-bottom:1px solid var(--line-soft);font-size:12px;align-items:baseline} .logline:last-child{border-bottom:none}
+  .logline .ts{color:var(--faint);font-size:11px;width:140px;flex:none} .logline .lv{width:44px;flex:none;font-weight:600} .logline .msg{color:var(--ink-prose);white-space:pre-wrap;word-break:break-word}
+  .lv-INFO{color:var(--muted)} .lv-WARN{color:var(--amber)} .lv-ERROR{color:var(--red)}
+  /* config */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+  .card .row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 18px;border-bottom:1px solid var(--line-soft)} .card .row:last-child{border-bottom:none}
+  .lab{font-size:13px;color:var(--ink)} .lab small{display:block;color:var(--muted-soft);font-size:11px;margin-top:3px;font-weight:400}
+  .scope{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:14px}
+  .opt{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:15px 16px;cursor:pointer} .opt.on{border-color:var(--green);box-shadow:0 0 0 1px var(--green)}
+  .opt .tt{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600} .opt .tt svg{width:16px;height:16px;stroke:var(--muted)} .opt.on .tt svg{stroke:var(--green)} .opt .ds{color:var(--muted);font-size:11.5px;margin-top:7px;line-height:1.6}
+  .listrow{display:flex;align-items:center;gap:11px;padding:11px 18px;border-bottom:1px solid var(--line-soft);font-size:12.5px} .listrow:last-of-type{border-bottom:none}
+  .listrow svg.lead{width:15px;height:15px;stroke:var(--muted-soft)} .listrow .path{color:var(--ink-prose);word-break:break-all} .listrow code{background:var(--surface-sunk);padding:1px 7px;border-radius:4px;font-size:11.5px}
+  .listrow .right{margin-left:auto;display:flex;align-items:center;gap:14px;flex:none} .listrow .cov{color:var(--muted-soft);font-size:11.5px;white-space:nowrap}
+  .rules{display:flex;flex-wrap:wrap;gap:7px;padding:14px 18px}
+  .rchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);background:var(--surface-sunk);border:1px solid var(--line);padding:3px 9px;border-radius:var(--r-chip)} .rchip svg{width:12px;height:12px;stroke:var(--green)}
+  .subh{font-size:12px;color:var(--ink);margin:18px 2px 9px;font-weight:600}
+  .pill-type{font-size:10.5px;color:var(--muted);background:var(--surface-sunk);padding:1px 8px;border-radius:var(--r-chip);flex:none}
+  .toggle{width:38px;height:22px;border-radius:var(--r-full);background:var(--green);position:relative;flex:none;cursor:pointer} .toggle.off{background:#d2cfc7} .toggle.lock{opacity:.45;cursor:not-allowed}
+  .toggle::after{content:"";position:absolute;top:2px;left:18px;width:18px;height:18px;border-radius:var(--r-full);background:#fff;transition:.15s} .toggle.off::after{left:2px}
+  .addrow{display:flex;align-items:center;gap:8px;padding:11px 18px;color:var(--green);cursor:pointer;font-size:12.5px;border-top:1px solid var(--line-soft)} .addrow svg{width:15px;height:15px;stroke:var(--green)}
+  .iconbtn{background:none;border:none;cursor:pointer;color:var(--faint);padding:2px;display:flex} .iconbtn:hover{color:var(--red)} .iconbtn svg{width:15px;height:15px}
+  .savebar{position:sticky;bottom:14px;margin-top:22px;background:var(--ink);color:#edece7;border-radius:var(--r-lg);padding:13px 18px;display:flex;align-items:center;gap:14px;font-size:12.5px;box-shadow:0 8px 30px #1a1a1726}
+  .savebar>svg{width:15px;height:15px;stroke:#e9a76b;flex:none} .savebar .delta{color:#cfcbc2} .savebar .delta b.up{color:#7ee2a1} .savebar .delta b.dn{color:#e9a76b} .savebar .sp{flex:1}
+  .savebar .btn{border:1px solid #ffffff2e;background:transparent;color:#edece7} .savebar .btn:hover{background:#ffffff14} .savebar .btn.go{background:#fff;color:var(--ink);border-color:#fff;font-weight:600}
+  .note{color:var(--faint);font-size:11px;margin:12px 2px 0}
+  /* drawer */
+  .scrim{position:fixed;inset:0;background:#1a1a1730;display:none} .scrim.on{display:block}
+  .drawer{position:fixed;top:0;right:0;height:100vh;width:600px;max-width:94vw;background:var(--surface);border-left:1px solid var(--line);box-shadow:-16px 0 50px #1a1a1714;transform:translateX(100%);transition:transform .18s ease;display:flex;flex-direction:column;z-index:5} .drawer.on{transform:translateX(0)}
+  .dh{padding:18px 22px;border-bottom:1px solid var(--line)} .dh .x{float:right;cursor:pointer;color:var(--muted);display:flex} .dh .x:hover{color:var(--ink)} .dh .x svg{width:18px;height:18px}
+  .dh h3{margin:0 0 7px;font-family:var(--font-sans);font-size:16px;font-weight:600;max-width:88%} .dh .coord{color:var(--muted-soft);font-size:11.5px} .dh .coord code{background:var(--surface-sunk);padding:1px 6px;border-radius:4px}
+  .dtabs{display:flex;padding:0 22px;border-bottom:1px solid var(--line)} .dtab{padding:11px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-size:12.5px} .dtab.on{color:var(--green);border-bottom-color:var(--green);font-weight:600}
+  .dbody{padding:20px 22px;overflow:auto;flex:1}
+  .transcript{font-size:12.5px;line-height:1.75;color:var(--ink-prose);white-space:pre-wrap;word-break:break-word}
+  .empty{color:var(--muted-soft);font-size:12.5px;padding:18px;text-align:center}
+  .df{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;background:var(--surface);align-items:center}
+  .df .meta{flex:1;line-height:1.4}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;font-family:inherit;font-size:12.5px;white-space:nowrap} .btn svg{width:14px;height:14px} .btn:hover{background:var(--surface-sunk)}
+  .btn.danger{border-color:#e6b3ad;color:var(--red)} .btn.danger:hover{background:#fbe9e7} .btn.danger svg{stroke:var(--red)}
+  .btn.go{background:var(--green);border-color:var(--green);color:#fff} .btn.go:hover{background:#136a34} .btn.go svg{stroke:#fff}
+  .spacer{flex:1}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#edece7;padding:11px 18px;border-radius:var(--r-md);font-size:12.5px;z-index:9;box-shadow:0 8px 30px #1a1a1733;opacity:0;transition:opacity .2s;pointer-events:none} .toast.on{opacity:1}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+</defs></svg>
+
+<div class="ribbon">
+  <div class="l"><svg><use href="#i-monitor"/></svg><span><b data-i18n="ribbon.local">Local console</b></span><span class="host" id="rb-host" data-i18n="ribbon.host">127.0.0.1 · only you can see this · not the shared library</span></div>
+  <div class="r"><span data-i18n="ribbon.onlinePre">Online</span> <a id="rb-online" href="#" target="_blank">shared library</a><svg><use href="#i-ext"/></svg></div>
+</div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span data-i18n="brand.name">Team Brain</span><small id="sb-who">local footprint</small></div>
+    <nav class="nav">
+      <a class="on" data-go="overview"><svg><use href="#i-grid"/></svg><span class="lbl" data-i18n="nav.overview">Overview</span></a>
+      <a data-go="sessions"><svg><use href="#i-layers"/></svg><span class="lbl" data-i18n="nav.sessions">My Sessions</span><span class="n" id="sb-n">·</span></a>
+      <a data-go="log"><svg><use href="#i-activity"/></svg><span class="lbl" data-i18n="nav.log">Activity</span></a>
+      <a data-go="config"><svg><use href="#i-sliders"/></svg><span class="lbl" data-i18n="nav.config">Collection</span></a>
+    </nav>
+    <div class="side-foot">
+      <div class="ln"><svg class="run"><use href="#i-power"/></svg><span id="sb-run" data-i18n="foot.collector">Collector</span></div>
+      <div class="ln"><svg><use href="#i-clock"/></svg><span id="sb-sync">—</span></div>
+      <div class="ver" id="sb-ver">—</div>
+      <button class="langtog" id="langtog">中文</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="page on" id="overview">
+      <h1 data-i18n="ov.title">Overview</h1>
+      <p class="sub" data-i18n="ov.sub">What this machine has published to the team's shared library — at a glance, retractable anytime.</p>
+      <div class="what">
+        <svg class="ic"><use href="#i-lock"/></svg>
+        <div class="tx" data-i18n-html="ov.what">This page lives <b>only on your machine</b> (127.0.0.1) and <b>only you can see it</b>. It governs <span class="g">what the collector uploads from this computer to the team's shared library</span>. Preview and exclude happen locally; only <b>Retract</b> reaches the shared library to delete an entry.</div>
+      </div>
+      <div id="ov-headline"></div>
+      <p class="note" data-i18n="ov.countNote">Counts are reconstructed from sessions still on this machine, so they can be fewer than the shared library (which keeps everything ever uploaded, including sessions whose local files were since removed). The shared library is the source of truth.</p>
+      <div class="sech"><svg><use href="#i-activity"/></svg><span data-i18n="ov.recent">Recent activity</span></div>
+      <div id="ov-recent"></div>
+    </section>
+
+    <section class="page" id="sessions">
+      <h1 data-i18n="ses.title">My Sessions</h1>
+      <p class="sub" data-i18n="ses.sub">Conversations already in / about to enter the shared library. Click any to see exactly what teammates see.</p>
+      <table><thead><tr><th style="width:104px" data-i18n="th.status">Status</th><th data-i18n="th.intent">Intent</th><th style="width:52px" data-i18n="th.tool">Tool</th><th style="width:190px" data-i18n="th.coord">Location</th><th style="width:94px" data-i18n="th.time">Worked</th></tr></thead><tbody id="rows"></tbody></table>
+      <p class="note" data-i18n="ses.note">Only sessions in / entering the library are listed. Out-of-scope, skipped, or retracted ones are hidden.</p>
+    </section>
+
+    <section class="page" id="log">
+      <h1 data-i18n="log.title">Activity</h1>
+      <p class="sub" data-i18n="log.sub">What the collector has been doing recently — same source as `brain logs`. Idle ticks (nothing happened) are hidden.</p>
+      <div class="log" id="logbox"></div>
+    </section>
+
+    <section class="page" id="config">
+      <h1 data-i18n="cfg.title">Collection Settings</h1>
+      <p class="sub" data-i18n="cfg.sub">What's collected, where it goes, what's masked before upload. All changes affect this machine only.</p>
+      <div id="cfg"></div>
+    </section>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <div class="dh"><span class="x" id="d-close"><svg class="ic"><use href="#i-x"/></svg></span><h3 id="d-title">—</h3><div class="coord" id="d-coord"></div></div>
+  <div class="dtabs"><span class="dtab on" data-tab="red" data-i18n="dr.tabRed">Redacted (what teammates see)</span><span class="dtab" data-tab="raw" data-i18n="dr.tabRaw">Local original</span></div>
+  <div class="dbody"><div class="transcript" id="d-body"></div></div>
+  <div class="df"><span class="meta" id="d-hint"></span><span class="spacer"></span><button class="btn danger" id="d-exclude" style="display:none"><svg class="ic"><use href="#i-ban"/></svg><span id="d-exclude-t">Retract</span></button></div>
+</aside>
+<div class="toast" id="toast"></div>
+
+<script src="/viewer.js"></script>
+</body>
+</html>

@@ -21,6 +21,7 @@ import { loadNotion, makeReq as makeNotionReq } from "../core/notion.mjs";
 import { loadGoogle, makeReq as makeGoogleReq } from "../core/google.mjs";
 import { initTruth } from "./gitstore.mjs";
 import { ingest } from "./ingest.mjs";
+import { retract } from "./retract.mjs";
 import { refreshAll, enumAndRegisterOrgRepos } from "./codestate.mjs";
 import { readSpaceMeta } from "./space.mjs";
 import { syncFeishuDocs } from "./feishudocs.mjs";
@@ -113,8 +114,11 @@ function buildClientTarball() {
     stage = mkdtempSync(join(tmpdir(), "tb-client-"));
     writeFileSync(join(stage, "package.json"), JSON.stringify(clientPkg, null, 2) + "\n");
     // tar 多个 -C：代码取自 ROOT，package.json 取自 stage（GNU/BSD tar 都支持）。
+    // web 只带本机查看器那两个文件（viewer.html/js，~44K，CSS 已内联、无外链字体）；
+    // 绝不带 web/fonts、web/app.* —— 那是线上服务端查看器，server-only，会把装机包撑肥。
     execFileSync("tar", ["czf", CLIENT_TGZ,
       "-C", ROOT, "core", "client", "mcp", "cli", "install.sh", "client.config.example.yaml",
+      "web/viewer.html", "web/viewer.js",
       "-C", stage, "package.json"], { stdio: "ignore" });
     log.info("[client] 已打包客户端", { path: CLIENT_TGZ });
   } catch (e) { log.warn("[client] 打包失败", { err: e.message }); }
@@ -508,6 +512,21 @@ async function handle(req, res, u) {
     } catch (e) {
       log.error("ingest failed", { who: member.id, id: payload?.id, err: e?.message });
       return json(res, 500, { error: "ingest 失败（详情见服务器日志）" });
+    }
+  }
+
+  // --- retract（撤回自己的 session）---
+  if (req.method === "POST" && u.pathname === "/retract") {
+    const member = authMember(req);
+    if (!member) return json(res, 401, { error: "invalid or missing token" });
+    let payload;
+    try { payload = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: "bad json" }); }
+    try {
+      const r = await retract(TRUTH, payload, member);
+      return json(res, 200, { ok: true, ...r });
+    } catch (e) {
+      log.error("retract failed", { who: member.id, id: payload?.id, err: e?.message });
+      return json(res, 500, { error: "retract 失败（详情见服务器日志）" });
     }
   }
 

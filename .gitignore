@@ -16,6 +16,8 @@ github.token
 
 sync*.log
 .brain-state.json
+.brain-ledger.json
+.brain-viewer.json
 
 # 飞书 PoC 凭证
 feishu-poc/secret.yaml
