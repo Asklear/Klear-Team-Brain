@@ -8,6 +8,11 @@
 
 ---
 
+## [0.1.18] - 2026-06-25 · 任意 agent 远程挂载（HTTP 传输 MCP）
+
+### 新增
+- **远程 MCP 端点（`POST /mcp`）**：任何支持 MCP 的 agent——队友的 Cursor、基于 Agent SDK / Codex SDK 的 IM 机器人、云端 agent——现在只需「URL + Bearer token」即可挂载团队记忆，无需安装客户端、无需 spawn 子进程。与编辑器 MCP 同样的 8 个只读原语，由服务端直接提供（无状态、JSON 响应），`/read` 出口的密钥/路径脱敏照旧。工具定义单源化，stdio 与 HTTP 两种传输不会漂移。
+
 ## [0.1.17] - 2026-06-24 · 本地尝鲜 + Docker 一键自托管
 
 ### 新增

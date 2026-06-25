@@ -4,6 +4,9 @@
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
 import * as lark from "@larksuiteoapi/node-sdk";
+import { sleep, withRetry } from "./retry.mjs";
+
+export { sleep, withRetry };
 
 // feishu.yaml（服务器级、gitignore、启动加载 restart 生效，同 registry/tokens 一族）。
 // 缺文件 / 解析失败 / 没配齐 app 凭证 → 返回 null = 文档层不启用（与 GITHUB_TOKEN 缺省同款行为）。
@@ -18,22 +21,6 @@ export function loadFeishu(path) {
     poll_hours: Number(cfg.poll_hours) || 4,
     wiki_base: String(cfg.wiki_base || "").replace(/\/+$/, ""),   // 租户域名，可选，只用来拼可点的 url
   };
-}
-
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// 重试退避：429（限流）与 5xx（网关偶发）值得等一等再试；4xx 业务错误（权限/不存在）重试无意义直接抛。
-// status 取不到（网络层断连）也按可重试算。
-const RETRYABLE = new Set([429, 500, 502, 503, 504]);
-export async function withRetry(fn, { delays = [1000, 3000, 10000], sleepFn = sleep } = {}) {
-  for (let i = 0; ; i++) {
-    try { return await fn(); }
-    catch (e) {
-      const status = e?.response?.status ?? 0;
-      if (i >= delays.length || (status !== 0 && !RETRYABLE.has(status))) throw e;
-      await sleepFn(delays[i]);
-    }
-  }
 }
 
 // 统一请求口：client.request 自动注入 tenant_access_token；外面包一层重试。

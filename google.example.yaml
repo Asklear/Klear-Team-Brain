@@ -1,0 +1,28 @@
+# 复制成 google.yaml（服务器级、已 gitignore——含 service account 私钥）。
+# 不建该文件 / 不填凭证 → Google 文档层不启用（与 feishu.yaml / notion.yaml 同款"缺省即关"）。
+#
+# 准备（一次性）：
+#   1. 在 Google Cloud Console 建一个项目，启用 **Google Drive API**。
+#   2. 建一个 **service account**，给它生成一把 JSON key 并下载。
+#   3. 把要镜像的 Google 文档（或整个文件夹）**share 给该 service account 的邮箱**
+#      （xxx@xxx.iam.gserviceaccount.com），只读权限即可。
+#      —— 这步才是真正的授权闸：没 share 的文档 service account 看不到；文件夹内文档随文件夹继承。
+#   4. 填下面的凭证，重启 server。启动 120s 后首跑，一轮后文档落到
+#      google/<workspace>/<标题>--<doc_id>.md，grep/read 即可搜（正文已脱敏）。
+#
+# 凭证两种给法（二选一）：
+#   ① key_file：指向下载的 service-account JSON（把那个 .json 也放到 server 上、别进仓）。
+#   ② 内联 client_email + private_key（private_key 是多行 PEM，用 YAML 块标量 |）。
+#
+# 正本永远在 Google Docs（人在那读写），这棵子树只是可重建的只读检索镜像——要改去 Google Docs 改。
+
+key_file: /var/lib/team-brain/google-sa.json
+# 或者内联：
+# client_email: team-brain@your-project.iam.gserviceaccount.com
+# private_key: |
+#   -----BEGIN PRIVATE KEY-----
+#   ...
+#   -----END PRIVATE KEY-----
+
+poll_hours: 4              # 轮询间隔（小时），可选，默认 4
+workspace: google         # 真相库 google/ 下的目录名（自己起一个），可选

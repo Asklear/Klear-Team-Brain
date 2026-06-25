@@ -9,6 +9,8 @@ team.yaml
 tokens.yaml
 registry.yaml
 feishu.yaml
+notion.yaml
+google.yaml
 github.token
 *.local.*
 
