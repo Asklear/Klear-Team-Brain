@@ -8,6 +8,23 @@ This project follows [Semantic Versioning](https://semver.org/), formatted after
 
 ---
 
+## [0.1.22] - 2026-06-25 · Hardened read-only queries + observable status
+
+### Added
+- **`brain status` shows your capture footprint and warns on failures**: it reads the result ledger to show what's been uploaded vs skipped, and scans the log tail for errors, so a broken sync no longer looks healthy. It also tells "not installed / not loaded" apart from "loaded but not running" via launchctl exit codes instead of guessing from a regex.
+- **`/health` is now a real readiness check**: verifies the truth store exists, is a git repo, and is writable; degrades to `503` + version instead of a blind `200`.
+- Configurable active-branch window for code-state via `CODESTATE_ACTIVE_DAYS` (default 30).
+
+### Changed
+- `brain join` first-run backfill now streams a rolling log and ends with a local-footprint summary.
+- Overview / repo / code-state wording for un-pushed progress is now the neutral "activity since last push".
+
+### Fixed
+- **Invalid regex in `grep` returns a clear error** instead of being swallowed as "no matches".
+- **`GITHUB_TOKEN_FILE` set but unreadable now warns at startup** instead of silently running token-less.
+- **Large-file guard on `/read`**: oversized full reads are refused; reads without a limit default to a 5000-line truncation with a pagination hint.
+- `brain join` reachability probe decoupled from `/health` `503`: any HTTP response now counts as "reachable".
+
 ## [0.1.21] - 2026-06-25 · Footprint viewer polish + English activity log
 
 ### Fixed
