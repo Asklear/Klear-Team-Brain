@@ -15,7 +15,7 @@ let lang = localStorage.getItem(LANG_KEY) === "zh" ? "zh" : "en";
 const I18N = {
   en: {
     // 静态（index.html）
-    "doc.title": "team-brain · truth layer",
+    "doc.title": "Klear-Team-Brain · truth layer",
     "doc.desc": "The truth layer of the team project brain — browse the whole team's sessions, team docs, code state and activity.",
     "nav.menu": "Menu",
     "brand.tag": "truth layer",
@@ -222,7 +222,7 @@ const I18N = {
     "token.invalidRetry": "Invalid token, check and retry.",
   },
   zh: {
-    "doc.title": "team-brain · 真相层",
+    "doc.title": "Klear-Team-Brain · 真相层",
     "doc.desc": "团队项目大脑的真相层 —— 浏览全队 session、团队文档、代码状态与活动流。",
     "nav.menu": "菜单",
     "brand.tag": "真相层",

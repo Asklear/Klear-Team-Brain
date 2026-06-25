@@ -48,6 +48,16 @@ export async function syncDocs(TRUTH, req, provider, opts = {}) {
     try { docs = await provider.walkDocs(req, collection); }
     catch (e) { errors++; log.warn(`[${provider.label}] 遍历库失败，跳过（不清理）`, { err: e.message }); continue; }
 
+    // 零文档保护（零库保护的文档级版本）：本轮一篇都没遍历到、但镜像里已有 .md → 多半是遍历异常
+    // 返回了空（而非源真清空），跳过该库的写入与 prune，护住已有镜像。代价：源里整库被真删空时，
+    // 末次镜像会留存到该库从 listCollections 消失（由上面的库级 prune 兜底清掉）—— 宁可旧、不可误删。
+    const existingMd = (() => { try { return readdirSync(dir).filter((f) => f.endsWith(".md")); } catch { return []; } })();
+    if (!docs.length && existingMd.length) {
+      errors++;
+      log.warn(`[${provider.label}] 库「${dirName}」本轮遍历到 0 篇，但镜像已有 ${existingMd.length} 篇 → 跳过，不清理`);
+      continue;
+    }
+
     const expect = new Set();
     for (const item of docs) {
       const { node } = item;

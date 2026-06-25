@@ -45,6 +45,8 @@
 
 **前置：** Node 22+；一个支持 MCP 的编辑器／CLI（Claude Code 或 Codex）用来提问。
 
+> **不上 npm、也没有 SaaS——本就是自托管。** 没有公开包、没有托管服务：clone 这个仓来起服务器（或本地尝鲜），队友的客户端直接从**你的**服务器拉（`curl …/get | bash`）——见 [给团队部署](#给团队部署)。
+
 ### 先本地试一下（约 5 分钟——免 VPS、免 HTTPS、免邀请码）
 
 想正式起服务器前先尝尝鲜？整套东西可以在你自己机器上单人跑起来：
@@ -188,7 +190,7 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 
 ## 更新日志
 
-每版改了什么见 [更新日志](./public_docs/CHANGELOG.zh-CN.md)（[English](./public_docs/CHANGELOG.en.md)）。
+每版改了什么见 [更新日志](./docs/CHANGELOG.zh-CN.md)（[English](./docs/CHANGELOG.en.md)）。
 
 ## 非目标
 

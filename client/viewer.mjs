@@ -26,10 +26,10 @@ export function startViewer({ ROOT, cfg, paths }) {
   const server = http.createServer((req, res) => {
     handle(req, res, ctx).catch((e) => json(res, 500, { error: String(e?.message || e) }));
   });
-  server.on("error", (e) => log.warn("viewer 监听异常", { err: e.message }));
+  server.on("error", (e) => log.warn("viewer listen error", { err: e.message }));
   listen(server, Number(cfg.viewer_port) || 7878, 0, (port) => {
     writeFileSync(INFO, JSON.stringify({ port, url: `http://127.0.0.1:${port}/`, pid: process.pid }));
-    log.info("本机查看器已起", { url: `http://127.0.0.1:${port}/` });
+    log.info("local viewer up", { url: `http://127.0.0.1:${port}/` });
   });
   return server;
 }
@@ -38,7 +38,7 @@ export function startViewer({ ROOT, cfg, paths }) {
 function listen(server, port, tries, onUp) {
   server.once("error", (e) => {
     if (e.code === "EADDRINUSE" && tries < 20) { listen(server, port + 1, tries + 1, onUp); }
-    else log.warn("viewer 起不来", { err: e.message });
+    else log.warn("viewer failed to start", { err: e.message });
   });
   server.listen(port, "127.0.0.1", () => onUp(port));
 }
