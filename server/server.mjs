@@ -28,6 +28,7 @@ import { syncNotionDocs } from "./notiondocs.mjs";
 import { syncGoogleDocs } from "./googledocs.mjs";
 import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, statsTruth, frontmatterOf, spaceStatsTruth } from "./query.mjs";
 import { canonicalizePath, canonicalSpaceKey } from "../core/identity.mjs";
+import { makeMcpHttpHandler } from "./mcphttp.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TRUTH = process.env.TRUTH_DIR || join(ROOT, "truth-server");
@@ -212,6 +213,10 @@ const resolveSpace = (key) => {
   return key;
 };
 
+// HTTP 传输的 MCP 端点处理器（POST /mcp）：复用现有 8 个 query 函数（经 localExec）+ 现有鉴权。
+// 与 stdio MCP 共用 mcp/tools.mjs 的工具定义；resolvePath/resolveSpace 闭包注入，复用别名/历史坐标兜底。
+const mcpHandler = makeMcpHttpHandler({ TRUTH, registry, roster, githubToken: GITHUB_TOKEN, resolvePath, resolveSpace });
+
 const server = http.createServer((req, res) => {
   const t0 = Date.now();
   for (const [k, v] of Object.entries(SEC_HEADERS)) res.setHeader(k, v);
@@ -283,6 +288,17 @@ async function handle(req, res, u) {
     if (!existsSync(CLIENT_TGZ)) return json(res, 503, { error: "client 包未就绪" });
     res.writeHead(200, { "content-type": "application/gzip" });
     return createReadStream(CLIENT_TGZ).pipe(res);
+  }
+
+  // --- HTTP 传输的 MCP（远程 Agent 用「URL + Bearer token」挂载真相库；与 stdio MCP 同工具集）---
+  // 鉴权复用 authMember（与所有 query 端点同一套成员 token）。无状态：POST 带 JSON-RPC 体，传输回 JSON。
+  if (u.pathname === "/mcp") {
+    if (!authMember(req)) return json(res, 401, { error: "invalid token" });
+    let body;
+    if (req.method === "POST") {
+      try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: "bad json" }); }
+    }
+    return mcpHandler(req, res, body);   // transport 自行按 method(POST/GET/DELETE) 处理
   }
 
   // --- 校验 token 身份（brain join 自检用）---

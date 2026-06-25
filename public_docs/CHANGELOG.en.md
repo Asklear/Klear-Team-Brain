@@ -8,6 +8,11 @@ This project follows [Semantic Versioning](https://semver.org/), formatted after
 
 ---
 
+## [0.1.18] - 2026-06-25 · Mount the memory from any agent (HTTP-transport MCP)
+
+### Added
+- **Remote MCP endpoint (`POST /mcp`)**: any MCP-capable agent — a teammate's Cursor, an IM bot built on the Agent SDK / Codex SDK, a cloud agent — can now mount the memory with just a URL + bearer token, no client install or subprocess to spawn. It serves the same eight read-only primitives as the editor MCP, straight from the server (stateless, JSON responses), with secret/path redaction preserved at the `/read` exit. The tool definitions are single-sourced, so the stdio and HTTP transports can't drift.
+
 ## [0.1.17] - 2026-06-24 · Local trial + one-command Docker self-host
 
 ### Added
