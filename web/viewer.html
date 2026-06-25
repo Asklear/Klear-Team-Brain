@@ -25,7 +25,7 @@
   .ribbon .r{display:flex;align-items:center;gap:5px;color:#928e85;white-space:nowrap} .ribbon .r a{color:#c3bfb6;text-decoration:none} .ribbon .r a:hover{color:#fff} .ribbon .r svg{width:12px;height:12px;stroke:#928e85}
   /* layout */
   .app{display:grid;grid-template-columns:228px 1fr;min-height:calc(100vh - 36px)}
-  .side{background:var(--surface-side);border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:3px}
+  .side{background:var(--surface-side);border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:3px;min-height:calc(100vh - 36px);position:sticky;top:0}
   .brand{font-size:13px;font-weight:600;margin:0 8px 18px;letter-spacing:.2px} .brand small{display:block;color:var(--muted-soft);font-weight:400;font-size:11px;margin-top:4px}
   .nav a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r-md);color:var(--muted);text-decoration:none;cursor:pointer} .nav a svg{width:15px;height:15px;stroke:var(--muted-soft)}
   .nav a .lbl{flex:1} .nav a .n{font-size:11px;color:var(--faint)} .nav a:hover{background:#edeae2}

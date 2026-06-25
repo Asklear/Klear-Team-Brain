@@ -45,6 +45,8 @@ You get an answer synthesized across the team's **sessions + code + docs**, with
 
 **Prerequisites:** Node 22+, and an MCP-capable editor/CLI (Claude Code or Codex) to ask from.
 
+> **No npm/SaaS install — it's self-hosted by design.** There's no public package or hosted service: clone this repo to run the server (or to trial it locally), and your teammates pull the client straight from *your* server with `curl …/get | bash` — see [Deploy for your team](#deploy-for-your-team).
+
 ### Try it locally first (≈5 min — no VPS, no HTTPS, no invite token)
 
 Want to kick the tires before standing up a server? Run the whole thing on your own machine as a single user:
@@ -183,7 +185,7 @@ Unshared pages/docs stay invisible (the share is the real access gate); sub-page
 
 ## Changelog
 
-What changed in each release: [Changelog](./public_docs/CHANGELOG.en.md) ([中文](./public_docs/CHANGELOG.zh-CN.md)).
+What changed in each release: [Changelog](./docs/CHANGELOG.en.md) ([中文](./docs/CHANGELOG.zh-CN.md)).
 
 ## Non-goals
 

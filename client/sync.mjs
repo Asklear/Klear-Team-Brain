@@ -14,7 +14,7 @@ import { parseSession, parseSessionText } from "../core/parse.mjs";
 import { coordOf, expandHome, gitBranch, parseRemote } from "../core/coord.mjs";
 import { slimRaw, slimRawFile } from "../core/slim.mjs";
 import { log } from "../core/log.mjs";
-import { loadLedger, saveLedger, recordSession, getByFile } from "../core/ledger.mjs";
+import { loadLedger, saveLedger, recordSession, getByFile, allSessions } from "../core/ledger.mjs";
 import { loadOptout, isOptedOut } from "../core/optout.mjs";
 import { loadUserRedact, applyUserRedact } from "../core/userredact.mjs";
 import { startViewer } from "./viewer.mjs";
@@ -77,7 +77,7 @@ function reconcilePipeline() {
   for (const file of [...seenSession.keys()]) {
     if (file.startsWith(CODEX_ROOT)) { seenSession.delete(file); cleared++; }
   }
-  if (cleared) log.info("[流水线升级] 采集代次提升 → 重收 Codex 历史（补 token 用量）", { from: prevPipeline, to: PIPELINE_VERSION, codex_resync: cleared });
+  if (cleared) log.info("[pipeline-upgrade] generation bumped -> re-collect Codex history (recover token usage)", { from: prevPipeline, to: PIPELINE_VERSION, codex_resync: cleared });
   prevPipeline = PIPELINE_VERSION;
 }
 
@@ -87,7 +87,7 @@ function reconcileScope() {
   const cur = foldersStr();
   if (prevFoldersStr && prevFoldersStr !== cur) {
     seenSession.clear();
-    log.info("[范围变化] upload_folders 改了 → 清已读、重扫补全范围内所有历史");
+    log.info("[scope-changed] upload_folders changed -> clear seen, rescan all in-scope history");
   }
   prevFoldersStr = cur;
 }
@@ -99,7 +99,7 @@ function saveState() {
       pipeline: PIPELINE_VERSION,                        // 记下本次流水线代次，下次启动比对（升级则一次性重收）
       lastUpdateCheck,                                   // 记下上次自动更新自检时刻，重启不重置每天的节流
     }));
-  } catch (e) { log.warn("state 落盘失败", { err: e.message }); }
+  } catch (e) { log.warn("state save failed", { err: e.message }); }
 }
 
 // 有限并发池（B）：n 路并发跑 worker，卡住的只占自己一路，不阻塞其余
@@ -172,7 +172,7 @@ async function syncSessions() {
     if (seenSession.get(file) === m) continue;        // 没变
     const idEarly = basename(file).replace(/\.jsonl$/, "");
     if (isOptedOut(idEarly, file)) { seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idEarly, tool: "claude-code", status: "opted_out" }); continue; }
-    if (st.size > MAX_RAW) { log.warn("ingest 跳过：原文超读前上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idEarly, tool: "claude-code", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
+    if (st.size > MAX_RAW) { log.warn("cc skip: raw exceeds pre-read cap", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idEarly, tool: "claude-code", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
     const s = parseSession(file);
     if (!s.intent) { skip++; seenSession.set(file, m); recordSession({ file, mtime: m, id: idEarly, tool: "claude-code", status: "skipped", reason: "nointent", cwd: s.cwd }); continue; }
     if (!gated(s.cwd)) { skip++; seenSession.set(file, m); recordSession({ file, mtime: m, id: idEarly, tool: "claude-code", status: "skipped", reason: "gated", intent: s.intent, cwd: s.cwd }); continue; }
@@ -183,7 +183,7 @@ async function syncSessions() {
     try {
       const c = coordOf(s.cwd, cfg.upload_folders);   // 只算 remote + folder；github-vs-local 由服务器定
       const raw = applyUserRedact(slimRaw(readFileSync(file, "utf8")));  // 上传前瘦身 + 个人脱敏词表；完整原文留本机
-      if (raw.length > MAX_UPLOAD) { log.warn("ingest 跳过：瘦身后仍超上限", { id, mb: +(raw.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "claude-code", status: "skipped", reason: "toobig", ...coordFields(s, c), bytes_raw: size, bytes_slim: raw.length }); return; }
+      if (raw.length > MAX_UPLOAD) { log.warn("cc skip: still over cap after slim", { id, mb: +(raw.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "claude-code", status: "skipped", reason: "toobig", ...coordFields(s, c), bytes_raw: size, bytes_slim: raw.length }); return; }
       const r = await post("/ingest", {
         id, tool: "claude-code", raw,
         remote: c.remote, folder: c.folder, branch: s.branch,
@@ -193,8 +193,8 @@ async function syncSessions() {
         up++; seenSession.set(file, m);
         const sk = serverCoord(r);
         recordSession({ file, mtime: m, id, tool: "claude-code", status: "uploaded", ...coordFields(s, c), space_key: sk.space_key, server_file: sk.file, bytes_raw: size, bytes_slim: raw.length });
-      } else log.warn("ingest 上传失败", { id, status: r.status, body: (r.body || "").slice(0, 200) });
-    } catch (e) { log.error("ingest 出错", { id, err: e.message }); } // 读/瘦身/上传任一出错只困住这条，不拖垮整轮；失败不 mark seen → 下一轮重试
+      } else log.warn("cc upload failed", { id, status: r.status, body: (r.body || "").slice(0, 200) });
+    } catch (e) { log.error("cc error", { id, err: e.message }); } // 读/瘦身/上传任一出错只困住这条，不拖垮整轮；失败不 mark seen → 下一轮重试
   });
   return { up, skip };
 }
@@ -220,7 +220,7 @@ async function syncCodexSessions() {
     if (seenSession.get(file) === m) continue;            // 没变
     const idC = basename(file).replace(/\.jsonl$/, "");
     if (isOptedOut(idC, file)) { seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idC, tool: "codex", status: "opted_out" }); continue; }
-    if (st.size > MAX_RAW_CODEX) { log.warn("codex 跳过：原文超采集上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idC, tool: "codex", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
+    if (st.size > MAX_RAW_CODEX) { log.warn("codex skip: raw over collect cap", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idC, tool: "codex", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
     jobs.push({ file, m, size: st.size });               // 读/蒸馏/判闸门都挪进 worker：流式逐行，不再整文件读成大字符串
   }
   await pool(jobs, CONC, async ({ file, m, size }) => {
@@ -237,7 +237,7 @@ async function syncCodexSessions() {
       // 没记（旧 rollout）才回退到现场 git：remote 按 cwd 现取 origin、branch 按 cwd 现取当前分支。
       const remote = c.remote || parseRemote(s.repoUrl);
       const branch = s.branch || gitBranch(s.cwd);
-      if (slim.length > MAX_UPLOAD) { log.warn("codex 跳过：瘦身后仍超上限", { id, mb: +(slim.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "codex", status: "skipped", reason: "toobig", ...coordFields(s, { remote, folder: c.folder }, branch), bytes_raw: size, bytes_slim: slim.length }); return; }
+      if (slim.length > MAX_UPLOAD) { log.warn("codex skip: still over cap after slim", { id, mb: +(slim.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "codex", status: "skipped", reason: "toobig", ...coordFields(s, { remote, folder: c.folder }, branch), bytes_raw: size, bytes_slim: slim.length }); return; }
       const r = await post("/ingest", {
         id, tool: "codex", raw: applyUserRedact(slim),
         remote, folder: c.folder, branch,
@@ -247,8 +247,8 @@ async function syncCodexSessions() {
         up++; seenSession.set(file, m);
         const sk = serverCoord(r);
         recordSession({ file, mtime: m, id, tool: "codex", status: "uploaded", ...coordFields(s, { remote, folder: c.folder }, branch), space_key: sk.space_key, server_file: sk.file, bytes_raw: size, bytes_slim: slim.length });
-      } else log.warn("codex 上传失败", { id, status: r.status, body: (r.body || "").slice(0, 200) });
-    } catch (e) { log.error("codex 出错", { id, err: e.message }); } // 单文件出错只困住这条，不拖垮整轮
+      } else log.warn("codex upload failed", { id, status: r.status, body: (r.body || "").slice(0, 200) });
+    } catch (e) { log.error("codex error", { id, err: e.message }); } // 单文件出错只困住这条，不拖垮整轮
   });
   return { up, skip };
 }
@@ -317,10 +317,10 @@ async function syncSessionHistoryMd() {
     if (seenSession.get(file) === m) continue;
     const idH = sessionHistoryId(file);
     if (isOptedOut(idH, file)) { seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idH, tool: "session-history-md", status: "opted_out" }); continue; }
-    if (st.size > MAX_RAW) { log.warn("session-history 跳过：原文超读前上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idH, tool: "session-history-md", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
+    if (st.size > MAX_RAW) { log.warn("session-history skip: raw exceeds pre-read cap", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idH, tool: "session-history-md", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
     const cwd = sessionHistoryProjectDir(file);
     if (!gated(cwd) || !gated(file)) { skip++; seenSession.set(file, m); recordSession({ file, mtime: m, id: sessionHistoryId(file), tool: "session-history-md", status: "skipped", reason: "gated", cwd }); continue; }
-    let content; try { content = readFileSync(file, "utf8"); } catch (e) { log.warn("session-history 读取失败", { file: basename(file), err: e.message }); continue; }
+    let content; try { content = readFileSync(file, "utf8"); } catch (e) { log.warn("session-history read failed", { file: basename(file), err: e.message }); continue; }
     if (!content.trim()) { skip++; seenSession.set(file, m); recordSession({ file, mtime: m, id: sessionHistoryId(file), tool: "session-history-md", status: "skipped", reason: "empty", cwd }); continue; }
     jobs.push({ file, m, cwd, content });
   }
@@ -331,7 +331,7 @@ async function syncSessionHistoryMd() {
       const branch = gitBranch(cwd);
       const s = parseSessionText(content, "session-history-md"); // 取 intent/时间给账本（md 解析很便宜）
       const raw = sessionHistoryRaw({ file, cwd, branch, content, mtimeMs: m });
-      if (raw.length > MAX_UPLOAD) { log.warn("session-history 跳过：上传体超上限", { id, mb: +(raw.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "session-history-md", status: "skipped", reason: "toobig", ...coordFields({ ...s, cwd }, c, branch), bytes_slim: raw.length }); return; }
+      if (raw.length > MAX_UPLOAD) { log.warn("session-history skip: payload over cap", { id, mb: +(raw.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "session-history-md", status: "skipped", reason: "toobig", ...coordFields({ ...s, cwd }, c, branch), bytes_slim: raw.length }); return; }
       const r = await post("/ingest", {
         id, tool: "session-history-md", raw: applyUserRedact(raw),
         remote: c.remote, folder: c.folder, branch,
@@ -341,8 +341,8 @@ async function syncSessionHistoryMd() {
         up++; seenSession.set(file, m);
         const sk = serverCoord(r);
         recordSession({ file, mtime: m, id, tool: "session-history-md", status: "uploaded", ...coordFields({ ...s, cwd }, c, branch), space_key: sk.space_key, server_file: sk.file, bytes_slim: raw.length });
-      } else log.warn("session-history 上传失败", { id, status: r.status, body: (r.body || "").slice(0, 200) });
-    } catch (e) { log.error("session-history 出错", { id, err: e.message }); }
+      } else log.warn("session-history upload failed", { id, status: r.status, body: (r.body || "").slice(0, 200) });
+    } catch (e) { log.error("session-history error", { id, err: e.message }); }
   });
   return { up, skip };
 }
@@ -413,8 +413,8 @@ async function syncTraeSessionMemory() {
       if (seenSession.get(file) === m) continue;
       const idT = traeMemoryId(file);
       if (isOptedOut(idT, file)) { seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idT, tool: "trae-session-memory", status: "opted_out" }); continue; }
-      if (st.size > MAX_RAW) { log.warn("trae-memory 跳过：原文超读前上限", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idT, tool: "trae-session-memory", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
-      let raw; try { raw = readFileSync(file, "utf8"); } catch (e) { log.warn("trae-memory 读取失败", { file: basename(file), err: e.message }); continue; }
+      if (st.size > MAX_RAW) { log.warn("trae-memory skip: raw exceeds pre-read cap", { file: basename(file), mb: +(st.size / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id: idT, tool: "trae-session-memory", status: "skipped", reason: "toobig", bytes_raw: st.size }); continue; }
+      let raw; try { raw = readFileSync(file, "utf8"); } catch (e) { log.warn("trae-memory read failed", { file: basename(file), err: e.message }); continue; }
       const s = parseSessionText(raw, "trae-session-memory");
       if (!s.intent) { skip++; seenSession.set(file, m); recordSession({ file, mtime: m, id: traeMemoryId(file), tool: "trae-session-memory", status: "skipped", reason: "nointent" }); continue; }
       jobs.push({ file, m, project, raw, s });
@@ -428,7 +428,7 @@ async function syncTraeSessionMemory() {
       const branch = cwd ? gitBranch(cwd) : "no-branch";
       const folder = c.folder || `trae/${project.slug}`;
       const slimmed = slimRaw(raw); // 复用客户端上传前脱敏/瘦身，避免 Trae memory raw 把密钥带上服务端。
-      if (slimmed.length > MAX_UPLOAD) { log.warn("trae-memory 跳过：上传体超上限", { id, mb: +(slimmed.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "trae-session-memory", status: "skipped", reason: "toobig", ...coordFields({ ...s, cwd }, { remote: c.remote, folder }, branch), bytes_raw: raw.length, bytes_slim: slimmed.length }); return; }
+      if (slimmed.length > MAX_UPLOAD) { log.warn("trae-memory skip: payload over cap", { id, mb: +(slimmed.length / 1048576).toFixed(0) }); seenSession.set(file, m); skip++; recordSession({ file, mtime: m, id, tool: "trae-session-memory", status: "skipped", reason: "toobig", ...coordFields({ ...s, cwd }, { remote: c.remote, folder }, branch), bytes_raw: raw.length, bytes_slim: slimmed.length }); return; }
       const r = await post("/ingest", {
         id, tool: "trae-session-memory", raw: applyUserRedact(slimmed),
         remote: c.remote, folder, branch,
@@ -438,8 +438,8 @@ async function syncTraeSessionMemory() {
         up++; seenSession.set(file, m);
         const sk = serverCoord(r);
         recordSession({ file, mtime: m, id, tool: "trae-session-memory", status: "uploaded", ...coordFields({ ...s, cwd }, { remote: c.remote, folder }, branch), space_key: sk.space_key, server_file: sk.file, bytes_raw: raw.length, bytes_slim: slimmed.length });
-      } else log.warn("trae-memory 上传失败", { id, status: r.status, body: (r.body || "").slice(0, 200) });
-    } catch (e) { log.error("trae-memory 出错", { id, err: e.message }); }
+      } else log.warn("trae-memory upload failed", { id, status: r.status, body: (r.body || "").slice(0, 200) });
+    } catch (e) { log.error("trae-memory error", { id, err: e.message }); }
   });
   return { up, skip };
 }
@@ -477,7 +477,7 @@ async function backfillLedger() {
       done++;
     } catch { recordSession({ file, mtime: m, id, tool, status: "uploaded", bytes_raw: st.size, backfilled: true }); done++; }
   }
-  if (done) { saveLedger(); log.info("[历史回填] 已补账本", { added: done }); }
+  if (done) { saveLedger(); log.info("[backfill] ledger backfilled", { added: done }); }
 }
 
 async function tick() {
@@ -495,8 +495,8 @@ let ticking = false;
 async function safeTick() {
   if (ticking) return;
   ticking = true;
-  try { await tick(); } catch (e) { log.error("tick 异常", { err: e.message }); } finally { ticking = false; }
-  try { await maybeAutoUpdate(); } catch (e) { log.warn("自动更新自检异常", { err: e.message }); }
+  try { await tick(); } catch (e) { log.error("tick error", { err: e.message }); } finally { ticking = false; }
+  try { await maybeAutoUpdate(); } catch (e) { log.warn("auto-update check error", { err: e.message }); }
 }
 
 // 版本比较：a>b 正、相等 0、a<b 负（形如 "0.1.15"，非数字段按 0）
@@ -525,7 +525,7 @@ async function maybeAutoUpdate() {
     latest = (await r.json()).version;
   } catch { return; }
   if (!latest || latest === "unknown" || cmpVer(latest, CLIENT_VERSION) <= 0) return;
-  log.info("[自动更新] 发现新客户端版本 → 落盘并以新代码重启", { from: CLIENT_VERSION, to: latest });
+  log.info("[auto-update] newer client found -> stage + restart with new code", { from: CLIENT_VERSION, to: latest });
   await new Promise((res) => setTimeout(res, Math.floor(Math.random() * 300000))); // 抖动 0–5min：错开全队部署后一窝蜂拉 /client.tgz
   // 同步等更新落盘（--no-restart：只覆盖代码，不在子进程里重启）；成功则本进程退出，由常驻管理器以新代码拉起
   const code = await new Promise((res) => {
@@ -535,10 +535,10 @@ async function maybeAutoUpdate() {
     child.on("error", () => { clearTimeout(t); res(-1); });
   });
   if (code === 0) {
-    log.info("[自动更新] 新代码已就位 → 退出，等常驻以新代码重启");
+    log.info("[auto-update] new code staged -> exiting, resident restarts with it");
     process.exit(0);                                     // 退出处理器释放单例锁；KeepAlive/Restart=always 立刻以新代码拉起
   }
-  log.warn("[自动更新] 更新失败，明天再试", { code });
+  log.warn("[auto-update] update failed, retry tomorrow", { code });
 }
 
 // 单例锁（仅常驻模式）：挡住同一 checkout 的第二个常驻 sync，避免两个进程重复上传。
@@ -552,7 +552,7 @@ function acquireLock() {
     if (e.code !== "EEXIST") throw e;
     const old = Number(readFileSync(LOCK, "utf8")) || 0;
     let alive = false; try { process.kill(old, 0); alive = true; } catch (err) { alive = err.code === "EPERM"; } // EPERM=进程在没权限→仍算活；ESRCH=真没了
-    if (alive) { log.warn("已有常驻 sync 在跑，本进程退出避免重复上传", { pid: old }); process.exit(0); }
+    if (alive) { log.warn("another resident sync running, exiting to avoid double upload", { pid: old }); process.exit(0); }
     writeFileSync(LOCK, String(process.pid));             // 陈旧锁（旧进程已死）→ 接管
   }
   const release = () => { try { if (Number(readFileSync(LOCK, "utf8")) === process.pid) unlinkSync(LOCK); } catch {} };
@@ -568,9 +568,30 @@ loadOptout(OPTOUT);                                     // 复原逐条排除名
 loadUserRedact(USERREDACT);                             // 复原个人脱敏词表
 reconcileScope();                                       // 范围变了就清 seen、补全新范围历史
 reconcilePipeline();                                    // 流水线升级了就重收受影响历史（当前：Codex token 用量）
-log.info("sync 启动", { server: cfg.server_url, folders: (cfg.upload_folders || []).length, collect_all: COLLECT_ALL, conc: CONC, seen: seenSession.size, ver: CLIENT_VERSION, once });
+log.info("sync started", { server: cfg.server_url, folders: (cfg.upload_folders || []).length, collect_all: COLLECT_ALL, conc: CONC, seen: seenSession.size, ver: CLIENT_VERSION, once });
 // 本机查看器（仅常驻模式起；--once 回填不起，免得拉起一个短命监听）。失败不致命：采集照常。
-if (!once) { try { startViewer({ ROOT, cfg, paths: { CC_ROOT, CODEX_ROOT, TRAE_MEMORY_ROOT } }); } catch (e) { log.warn("viewer 启动失败（不影响采集）", { err: e.message }); } }
+if (!once) { try { startViewer({ ROOT, cfg, paths: { CC_ROOT, CODEX_ROOT, TRAE_MEMORY_ROOT } }); } catch (e) { log.warn("viewer start failed (collection unaffected)", { err: e.message }); } }
 await safeTick();
-if (!once) backfillLedger().catch((e) => log.warn("历史回填异常", { err: e.message }));   // 首轮上传后再回填历史，不拖慢启动
+if (once) printOnceSummary();                          // --once（含 join 首次回填）：给一句人话小结，别让用户只看到滚动日志/以为卡死
+if (!once) backfillLedger().catch((e) => log.warn("backfill error", { err: e.message }));   // 首轮上传后再回填历史，不拖慢启动
 if (!once) setInterval(safeTick, (cfg.interval_sec ?? 60) * 1000);
+
+// --once 跑完打印「本机足迹」小结：传了几条 / 跳过几条（按原因），让 join 首同步有明确收尾。
+// 数据取自结果账本（累计），首次接入时≈本轮结果；逐条细节走 brain viewer。
+function printOnceSummary() {
+  const all = allSessions();
+  if (!all.length) { console.log("\n本机足迹：这台机器上还没扫到可上传的 session（装了 Claude Code / Codex 并用过才有）。\n"); return; }
+  const up = all.filter((s) => s.status === "uploaded").length;
+  const opted = all.filter((s) => s.status === "opted_out").length;
+  const skipped = all.filter((s) => s.status === "skipped");
+  const REASON_CN = { gated: "不在采集范围", nointent: "无对话内容", toobig: "体积超限", subagent: "子代理会话", empty: "空文件", excluded: "已排除", error: "出错" };
+  const byReason = {};
+  for (const s of skipped) { const k = REASON_CN[s.reason] || s.reason || "其它"; byReason[k] = (byReason[k] || 0) + 1; }
+  const parts = Object.entries(byReason).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`);
+  console.log(`\n本机足迹：已上传 ${up} 条`
+    + (opted ? ` · 个人排除 ${opted} 条` : "")
+    + (skipped.length ? ` · 跳过 ${skipped.length} 条（${parts.join(" / ")}）` : ""));
+  const gatedN = skipped.filter((s) => s.reason === "gated").length;
+  if (gatedN) console.log(`  ↳ 其中 ${gatedN} 条不在采集范围（upload_folders 之外）——要纳入就把对应目录加进 upload_folders 再重跑。`);
+  console.log(`  逐条看（哪些传了 / 没传 / 为什么）：brain viewer\n`);
+}

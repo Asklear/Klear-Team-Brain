@@ -169,7 +169,8 @@ async function setup() {
   let collectAll = false;
   if (!folders.length) {
     collectAll = true;
-    console.log(c.warn(`⚠️ 没指定工作空间 → 默认采集本机所有 session（含全部项目，队友都能看到原文）。要收窄回头改 upload_folders。`));
+    console.log(c.warn(`⚠️ 没指定工作空间 → 默认采集本机【所有项目】的 session：这台机器上每个项目的 AI 对话原文都会上传，全队都能 grep 到。`));
+    console.log(c.dim(`  含密钥 / 客户数据 / 私人项目的，回头改 upload_folders 收窄（改完 brain service restart）。`));
   } else {
     for (const f of folders) if (!existsSync(f)) console.log(c.warn(`  ⚠ ${f} 现在不存在，先写进去，回头建了即可`));
   }
@@ -254,12 +255,16 @@ async function joinCmd(code) {
   if (!srv || !token || !id) die("邀请码字段缺失");
   const consume = !!inv.consumer || process.argv.includes("--consume-only");
 
-  // 1. 可达 + 鉴权
+  // 1. 可达 + 鉴权（分清三种失败：连不上服务器 / token 无效 / 网络抖动 —— 别一律说成「邀请码过期」误导排查）
   const reach = await fetch(srv + "/health").then((r) => r.ok).catch(() => false);
-  if (!reach) die(`连不上 ${srv}（检查网络/代理）`);
-  const who = await fetch(srv + "/whoami", { headers: { authorization: `Bearer ${token}`, "x-client-version": CLIENT_VERSION } })
-    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  if (!who) die("token 校验失败（邀请码可能过期，找管理员重发）");
+  if (!reach) die(`连不上 ${srv}（服务器没起 / 网络 / 代理？先确认地址能在浏览器打开）`);
+  let who = null, whoErr = "";
+  try {
+    const r = await fetch(srv + "/whoami", { headers: { authorization: `Bearer ${token}`, "x-client-version": CLIENT_VERSION } });
+    if (r.ok) who = await r.json();
+    else whoErr = (r.status === 401 || r.status === 403) ? "token 无效或已过期 → 找管理员重发邀请码" : `服务器返回 ${r.status}（服务端异常，找管理员看日志）`;
+  } catch (e) { whoErr = `网络中断（${e.message}）—— 刚才还连得上，多半是抖动，稍后重跑 brain join`; }
+  if (!who) die(`身份校验没过：${whoErr}`);
   console.log(c.ok(`✓ 服务器 ${srv} 可达，身份 ${who.name}（${who.id}）`));
 
   // 2. git 名软校验（作者归一；对不上不阻断）
@@ -275,8 +280,10 @@ async function joinCmd(code) {
     const raw = (await rl.question(`要采集的工作空间（逗号分隔${sugg.length ? "，回车=全选上面" : "，留空=采集本机所有 session"}）: `)).trim();
     folders = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : sugg;
     if (!folders.length) {
-      console.log(c.warn(`⚠️ 没指定工作空间 → 默认采集本机所有 session（含全部项目，队友都能看到原文）。含密钥/客户数据的项目请改填具体工作空间，或加 --consume-only 只问不传。`));
-      const ok = (await rl.question(`确认采集本机全部 session？(Y/n): `)).trim().toLowerCase();
+      console.log(c.warn(`⚠️ 没指定工作空间 → 默认采集本机【所有项目】的 session：不止下面这些仓，这台机器上每个项目的 AI 对话原文都会上传，全队都能 grep 到。`));
+      if (sugg.length) console.log(c.dim(`  例如 ${sugg.slice(0, 5).join("、")}${sugg.length > 5 ? " 等" : ""}，以及未列出的其它所有项目。`));
+      console.log(c.dim(`  含密钥 / 客户数据 / 私人项目的，强烈建议改填具体工作空间（逗号分隔重跑），或用 --consume-only 只问不传。`));
+      const ok = (await rl.question(`确认采集本机【全部】 session？(回车/y=全采，n=取消重选): `)).trim().toLowerCase();
       rl.close();
       if (ok === "n") die("已取消，重跑 brain join 指定工作空间");
       collectAll = true;
@@ -363,7 +370,7 @@ function serviceInstall({ soft = false } = {}) {
   if (!existsSync(CFG)) return fail("还没配置，先跑 brain setup");
   if (IS_MAC) {
     writePlist();
-    if (NODE_WARN) console.log(c.dim(`⚠ ${NODE_WARN}`));
+    if (NODE_WARN) console.log(c.warn(`⚠ ${NODE_WARN}`));
     // 只有已加载才 bootout（首装跳过）——bootout 是异步拆除，紧接 bootstrap 会撞 "5: I/O error"，首装本就不需要它。
     if (sh("launchctl", ["print", `${gui()}/${LABEL}`]).status === 0) { sh("launchctl", ["bootout", `${gui()}/${LABEL}`]); sleep(1); }
     let r;
@@ -378,7 +385,7 @@ function serviceInstall({ soft = false } = {}) {
     console.log(c.ok(`✓ 已装常驻（launchd ${LABEL}），开机自启。日志：${LOG}`));
   } else {
     writeUnit();
-    if (NODE_WARN) console.log(c.dim(`⚠ ${NODE_WARN}`));
+    if (NODE_WARN) console.log(c.warn(`⚠ ${NODE_WARN}`));
     sh("systemctl", ["--user", "daemon-reload"]);
     const r = sh("systemctl", ["--user", "enable", "--now", "team-brain-sync"]);
     if (r.status !== 0) return fail(`systemctl enable 失败：${(r.stderr || "").trim()}`);

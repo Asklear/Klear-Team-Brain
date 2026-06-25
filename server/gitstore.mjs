@@ -2,6 +2,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, mkdirSync } from "node:fs";
+import { log } from "../core/log.mjs";
 
 const pexec = promisify(execFile);
 const git = (dir, args) => pexec("git", ["-C", dir, ...args]).then((r) => r.stdout.trim());
@@ -12,11 +13,13 @@ export function initTruth(dir) {
   catch { execFileSync("git", ["-C", dir, "init", "-q"]); }
 }
 
-// 串行队列：即使某次失败也不卡住后面的
+// 串行队列：即使某次失败也不卡住后面的。失败会原样 reject 给调用方（ingest → HTTP 非 200 →
+// 客户端不 mark seen、下轮重试），队列这条 catch 只为不阻塞后续任务 —— 但要落一条日志，
+// 否则提交失败（git 冲突 / 磁盘满 / 锁）在服务端完全不可见。
 let chain = Promise.resolve();
 export function enqueue(fn) {
   const run = chain.then(fn, fn);
-  chain = run.catch(() => {});
+  chain = run.catch((e) => { log.warn("提交队列任务失败（不卡后续，调用方会收到该错误）", { err: e?.message || String(e) }); });
   return run;
 }
 
