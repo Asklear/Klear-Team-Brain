@@ -18,7 +18,7 @@ const T = {
   "foot.sync": ["synced {t}", "同步 {t}"], "foot.noSync": ["no sync yet", "尚无同步"],
   "who": ["{name}'s local footprint", "{name} 的本机足迹"],
   "ov.title": ["Overview", "概览"],
-  "ov.sub": ["What this machine has published to the team's shared library — at a glance, retractable anytime.", "team-brain 从这台机器往全队共享库发布了什么 —— 一眼看清，随时可撤。"],
+  "ov.sub": ["What this machine has published to the team's shared library — at a glance, retractable anytime.", "Klear-Team-Brain 从这台机器往全队共享库发布了什么 —— 一眼看清，随时可撤。"],
   "ov.what": ["This page lives <b>only on your machine</b> (127.0.0.1) and <b>only you can see it</b>. It governs <span class=\"g\">what the collector uploads from this computer to the team's shared library</span>. Preview and exclude happen locally; only <b>Retract</b> reaches the shared library to delete an entry.",
     "这个页面<b>只在你本机</b>（127.0.0.1）、<b>只有你能看</b>。它管的是「<span class=\"g\">采集常驻从这台电脑上传到全队共享库的内容</span>」。预览、排除都在本地发生；点「撤回」才会去线上库删掉对应那条。"],
   "ov.recent": ["Recent activity", "最近活动"],
