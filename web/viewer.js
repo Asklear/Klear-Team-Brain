@@ -1,5 +1,5 @@
 // 本机足迹查看器前端。默认英文，可切中文（localStorage tb_lang）。数据来自常驻内嵌的 127.0.0.1 /api/*。
-const TOKEN = new URLSearchParams(location.search).get("t") || "";
+// 本机 loopback，不需要 token 登录（服务端靠 Host/Origin 守卫挡跨站 + DNS-rebind）。
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const ic = (id) => `<svg class="ic"><use href="#${id}"/></svg>`;
@@ -40,6 +40,11 @@ const T = {
   "log.empty": ["Nothing meaningful yet (collector just started / no uploads).", "还没有有意义的活动（常驻刚起 / 没传过东西）。"],
   "cfg.title": ["Collection Settings", "采集配置"],
   "cfg.sub": ["What's collected, where it goes, what's masked before upload. All changes affect this machine only.", "我在采什么、传到哪、上传前再抹掉什么。所有改动只影响这台机器。"],
+  "conn.title": ["Connection", "连接"],
+  "conn.server": ["Server", "服务器"], "conn.identity": ["Identity", "身份"],
+  "conn.token": ["Your token", "你的 token"],
+  "conn.tokenHint": ["paste it into the shared-library website to sign in — no need to memorize it", "粘到线上共享库网站登录用 —— 不用记"],
+  "conn.copy": ["Copy", "复制"], "conn.copied": ["Token copied to clipboard", "已复制 token 到剪贴板"], "conn.reveal": ["Reveal", "显示"], "conn.hide": ["Hide", "隐藏"],
   "cfg.scope": ["Collection scope", "采集范围"],
   "cfg.scopeWl": ["Whitelist only", "仅白名单目录"], "cfg.scopeWlDesc": ["Only sessions under the listed folders are uploaded; the rest stay on this machine.", "只有列出的目录下的 session 才会上传，其余留在本机。"],
   "cfg.scopeAll": ["All sessions", "采集本机全部"], "cfg.scopeAllDesc": ["Every project's sessions are uploaded, including unlisted ones.", "所有项目的 session 都会传，含没列出的。"],
@@ -74,7 +79,7 @@ const T = {
   "prompt.addExclude": ["Absolute path of folder to exclude", "要排除的目录绝对路径"],
   "prompt.addTerm": ["Word / regex (use /pattern/flags for regex, e.g. /acme-\\w+/i)", "词 / 正则（用 /pattern/flags 表示正则，如 /acme-\\w+/i）"],
   "connFail": ["Connection failed", "连接失败"],
-  "connFailSub": ["{e}. Reopen with `brain viewer` (the URL carries a local token).", "{e}。请用 brain viewer 重新打开（带本地 token 的地址）。"],
+  "connFailSub": ["{e}. Make sure the collector is running (`brain status`), then reopen with `brain viewer`.", "{e}。确认采集常驻在跑（brain status），再用 brain viewer 打开。"],
 };
 const BUILTIN = {
   en: ["API Key (sk-…)", "GitHub PAT", "GitLab token", "AWS", "Google", "Slack", "Stripe", "JWT", "Private key (PEM)", "password/token assignments", "credentials in URLs", "home paths → ~"],
@@ -93,12 +98,12 @@ function applyStatic() {
 
 // ---------- API ----------
 async function api(p) {
-  const r = await fetch(p + (p.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(TOKEN));
+  const r = await fetch(p);
   if (!r.ok) { let e = {}; try { e = await r.json(); } catch {} throw new Error(e.error || ("HTTP " + r.status)); }
   return r.json();
 }
 async function apiPost(p, body) {
-  const r = await fetch(p + "?t=" + encodeURIComponent(TOKEN), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
+  const r = await fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
   if (!r.ok) { let e = {}; try { e = await r.json(); } catch {} throw new Error(e.error || ("HTTP " + r.status)); }
   return r.json();
 }
@@ -107,10 +112,12 @@ function toast(msg) { const el = $("toast"); el.textContent = msg; el.classList.
 
 let SESSIONS = { uploaded: [], pending: [] };
 let CUR = null, CFG = null, WCFG = null, REDACT = { terms: [] }, OV = null;
+let CONN = { server_url: "", device_token: "", me: {} }, TOK_SHOWN = false;
 
 // ---------- overview ----------
 function renderOverview(d) {
   OV = d;
+  CONN = { server_url: d.server_url || "", device_token: d.device_token || "", me: d.me || {} };
   $("sb-who").textContent = t("who", { name: d.me?.name || d.me?.id || (LANG === "zh" ? "本机" : "this machine") });
   $("sb-n").textContent = d.counts.uploaded + d.counts.pending;
   $("sb-run").textContent = t("foot.collectorRun");
@@ -157,7 +164,14 @@ function renderConfig() {
   if (!WCFG) return;
   const wl = !WCFG.collect_all, folders = WCFG.upload_folders || [], excl = WCFG.exclude || [];
   const tog = (key) => `<span class="toggle ${WCFG[key] === false ? "off" : ""}" data-act="toggle" data-key="${key}"></span>`;
-  let h = `<div class="sech">${ic("i-folder")}${t("cfg.scope")}</div>
+  const tk = CONN.device_token, tkShow = tk ? (TOK_SHOWN ? tk : tk.slice(0, 4) + "••••••••" + tk.slice(-4)) : "-";
+  let h = `<div class="sech">${ic("i-lock")}${t("conn.title")}</div>
+  <div class="card">
+    <div class="row"><div class="lab">${t("conn.server")}</div><div><code>${esc(CONN.server_url)}</code></div></div>
+    <div class="row"><div class="lab">${t("conn.identity")}</div><div><code>${esc(CONN.me.id || "")}</code> ${esc(CONN.me.name || "")}</div></div>
+    <div class="row"><div class="lab">${t("conn.token")}<small>${t("conn.tokenHint")}</small></div><div class="tokbox"><code>${esc(tkShow)}</code><button class="btn sm" data-act="revealtok">${TOK_SHOWN ? t("conn.hide") : t("conn.reveal")}</button><button class="btn sm" data-act="copytok">${t("conn.copy")}</button></div></div>
+  </div>
+  <div class="sech">${ic("i-folder")}${t("cfg.scope")}</div>
   <div class="scope">
     <div class="opt ${wl ? "on" : ""}" data-act="scope" data-val="wl"><div class="tt">${ic("i-folder")}${t("cfg.scopeWl")}</div><div class="ds">${t("cfg.scopeWlDesc")}</div></div>
     <div class="opt ${wl ? "" : "on"}" data-act="scope" data-val="all"><div class="tt">${ic("i-layers")}${t("cfg.scopeAll")}</div><div class="ds">${t("cfg.scopeAllDesc")}</div></div>
@@ -200,6 +214,8 @@ $("config").addEventListener("click", async (e) => {
   else if (act === "rmfolder") { WCFG.upload_folders.splice(+el.dataset.i, 1); renderConfig(); }
   else if (act === "addexcl") { const p = prompt(t("prompt.addExclude")); if (p) { (WCFG.exclude ||= []).push(p.trim()); renderConfig(); } }
   else if (act === "rmexcl") { WCFG.exclude.splice(+el.dataset.i, 1); renderConfig(); }
+  else if (act === "revealtok") { TOK_SHOWN = !TOK_SHOWN; renderConfig(); }
+  else if (act === "copytok") { try { await navigator.clipboard.writeText(CONN.device_token); toast(t("conn.copied")); } catch { toast(CONN.device_token || "-"); } }
   else if (act === "save") saveConfig();
   else if (act === "discard") { WCFG = clone(CFG); renderConfig(); }
   else if (act === "addterm") { const p = prompt(t("prompt.addTerm")); if (p) { const v = p.trim(); const type = /^\/.*\/[gimsuy]*$/.test(v) ? "regex" : "text"; await apiPost("/api/redact-add", { pattern: v, type }); await refreshRedact(); renderConfig(); toast(t("toast.termAdded")); } }
