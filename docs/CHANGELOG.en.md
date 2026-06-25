@@ -4,9 +4,41 @@ English | [中文](./CHANGELOG.zh-CN.md)
 
 This project follows [Semantic Versioning](https://semver.org/), formatted after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Check your local version with `brain version`.
 
-> Still pre-1.0 and early, incrementing by patch. Formal versioning began at `v0.1.11`; earlier versions are a retroactive split of the development history by milestone.
+> Still pre-1.0 and early, incrementing by patch. Formal versioning began at `v0.1.11`; earlier versions are a retroactive split of the development history by milestone. `v0.1.12`–`v0.1.13` were internal-only and never released publicly.
 
 ---
+
+## [0.1.22] - 2026-06-25 · Hardened read-only queries + observable status
+
+### Added
+- **`brain status` shows your capture footprint and warns on failures**: it reads the result ledger to show what's been uploaded vs skipped, and scans the log tail for errors, so a broken sync no longer looks healthy. It also tells "not installed / not loaded" apart from "loaded but not running" via launchctl exit codes instead of guessing from a regex.
+- **`/health` is now a real readiness check**: verifies the truth store exists, is a git repo, and is writable; degrades to `503` + version instead of a blind `200`.
+- Configurable active-branch window for code-state via `CODESTATE_ACTIVE_DAYS` (default 30).
+
+### Changed
+- `brain join` first-run backfill now streams a rolling log and ends with a local-footprint summary.
+- Overview / repo / code-state wording for un-pushed progress is now the neutral "activity since last push".
+
+### Fixed
+- **Invalid regex in `grep` returns a clear error** instead of being swallowed as "no matches".
+- **`GITHUB_TOKEN_FILE` set but unreadable now warns at startup** instead of silently running token-less.
+- **Large-file guard on `/read`**: oversized full reads are refused; reads without a limit default to a 5000-line truncation with a pagination hint.
+- `brain join` reachability probe decoupled from `/health` `503`: any HTTP response now counts as "reachable".
+
+## [0.1.21] - 2026-06-25 · Footprint viewer polish + English activity log
+
+### Fixed
+- Local footprint viewer: sidebar footer is now pinned full-height (previously only on the overview page), and the Activity log is fully in English.
+
+## [0.1.20] - 2026-06-25 · Login-free viewer + device token
+
+### Changed
+- **The local footprint viewer no longer asks for a token to log in** (accessing your own machine from your own machine needs no password); it shows your device token directly instead, and the hosted console gained a "Local console" entry that jumps straight to your on-machine viewer.
+
+## [0.1.19] - 2026-06-25 · Producer footprint viewer
+
+### Added
+- **Producer footprint viewer**: every producer can open a local web page to see exactly which of their sessions were captured and what was uploaded, exclude or retract individual items already in the memory, and maintain a personal redaction wordlist (custom sensitive terms masked before upload) — self-service transparency over what leaves your machine. The installer now bundles `web/viewer.*` (which previously 404'd on real installs), with zero new client dependencies.
 
 ## [0.1.18] - 2026-06-25 · Mount the memory from any agent (HTTP-transport MCP)
 

@@ -121,7 +121,9 @@ function writeConfig({ server, token, id, name, folders = [], consumer = false, 
       ? `# 未指定工作空间 → 采集本机所有 session（含全部项目）。要收窄改 upload_folders。\ncollect_all: true\nupload_folders: []\n`
       : `upload_folders:\n${folders.map((f) => `  - ${f}`).join("\n")}\n`) +
     `exclude: []\n\n` +
-    `docs: true\ncodex: true\nagentdocs: true\ninterval_sec: 60\ndebounce_sec: 60\n`);
+    // 采集开关：codex / session_history / Trae 原生记忆默认都开（与 client.config.example.yaml 对齐）。
+    // 别再写 docs/agentdocs —— M3 起这两个键没有任何代码读，是历史残留。
+    `codex: true\nsession_history_md: true\ntrae_memory: true\ninterval_sec: 60\ndebounce_sec: 60\n`);
 }
 
 // 从本机 CC session 推测"你常在哪些 git 仓干活"，作为 upload_folders 建议
@@ -256,7 +258,8 @@ async function joinCmd(code) {
   const consume = !!inv.consumer || process.argv.includes("--consume-only");
 
   // 1. 可达 + 鉴权（分清三种失败：连不上服务器 / token 无效 / 网络抖动 —— 别一律说成「邀请码过期」误导排查）
-  const reach = await fetch(srv + "/health").then((r) => r.ok).catch(() => false);
+  // 任意 HTTP 响应都算「连得上」（含 /health 因真相库降级回的 503）—— 只有网络层抛错才是真不可达。
+  const reach = await fetch(srv + "/health").then(() => true).catch(() => false);
   if (!reach) die(`连不上 ${srv}（服务器没起 / 网络 / 代理？先确认地址能在浏览器打开）`);
   let who = null, whoErr = "";
   try {
@@ -299,7 +302,7 @@ async function joinCmd(code) {
   writeConfig({ server: srv, token, id, name, folders, consumer: consume, collectAll });
   console.log(c.ok(`✓ 配置写好 ${CFG}`));
   const mcpAttached = addMcp();
-  console.log(c.dim("→ 首次回填历史 session（跨境可能要一会，别关）…"));
+  console.log(c.dim("→ 首次回填历史 session（跨境可能要几分钟，别关）。下面会滚动日志，结束有一句「本机足迹」小结…"));
   spawnSync(NODE, [join(ROOT, "client", "sync.mjs"), "--once"], { cwd: ROOT, stdio: "inherit" });
   serviceInstall({ soft: true });                       // 装常驻失败不致命：配置/MCP/回填都已成 —— 再起服务（sync 启动时已能读到完整 config）
   if (mcpAttached.length)
@@ -463,18 +466,31 @@ function status() {
   }
   let running = false;
   if (IS_MAC) {
+    // print 退出码先分清「没装/没加载」与「装了」：失败=没加载（别再被正则兜成误导的状态字）。
     const r = sh("launchctl", ["print", `${gui()}/${LABEL}`]);
-    const st = (r.stdout.match(/state = (\w+)/) || [, "未装"])[1];
-    const pid = (r.stdout.match(/pid = (\d+)/) || [, "-"])[1];
-    running = st === "running";
-    console.log(`常驻:    ${running ? c.ok(`running (pid ${pid})`) : c.warn(st)}`);
+    if (r.status !== 0) {
+      console.log(`常驻:    ${c.warn("未装 / 未加载")}`);
+    } else {
+      const st = (r.stdout.match(/state = (\S+)/) || [, "unknown"])[1];
+      const pid = (r.stdout.match(/pid = (\d+)/) || [, null])[1];
+      running = st === "running";
+      console.log(`常驻:    ${running ? c.ok(`running (pid ${pid})`) : c.warn(`已加载但没在跑（state=${st}）—— 看 brain logs 找原因`)}`);
+    }
   } else {
     const a = sh("systemctl", ["--user", "is-active", "team-brain-sync"]).stdout.trim();
     running = a === "active";
-    console.log(`常驻:    ${running ? c.ok(a) : c.warn(a || "未装")}`);
+    console.log(`常驻:    ${running ? c.ok(a) : c.warn(a || "未装 / 未加载")}`);
   }
+  // 采集足迹（从结果账本）：让用户一眼看到「传了多少 / 跳过多少」，不必去 viewer
+  try {
+    const led = JSON.parse(readFileSync(join(ROOT, ".brain-ledger.json"), "utf8"));
+    const ss = led.sessions || [];
+    const up = ss.filter((s) => s.status === "uploaded").length;
+    const sk = ss.filter((s) => s.status === "skipped").length;
+    if (up || sk) console.log(`采集:    ${c.ok(`${up} 已传`)}${sk ? c.dim(` · ${sk} 跳过（brain viewer 看逐条原因）`) : ""}`);
+  } catch {}
   if (existsSync(LOG)) {
-    // 取最近一条 tick（logfmt：`<ts> INFO  tick cc_up=… …`），只显示时间 + 计数体，别再匹配老格式的「·」
+    // 一次读，既取最近一条 tick，也扫尾巴有没有失败/报错 —— 别让「同步坏了」时 status 还显得一切正常
     const lines = readFileSync(LOG, "utf8").trimEnd().split("\n");
     const last = [...lines].reverse().find((l) => / tick /.test(l));
     if (last) {
@@ -482,6 +498,8 @@ function status() {
       const body = last.split(" tick ")[1] || last;
       console.log(`最近同步: ${c.dim((ts.slice(11, 19) + " " + body).trim())}`);
     }
+    const fails = lines.slice(-300).filter((l) => /上传失败|tick 异常|出错|ERROR/.test(l)).length;
+    if (fails) console.log(c.warn(`⚠ 最近日志里有 ${fails} 条失败/报错 —— brain logs -f 看详情`));
   }
   try { const vi = JSON.parse(readFileSync(join(ROOT, ".brain-viewer.json"), "utf8")); if (vi.url) console.log(`查看器:  ${c.ok(vi.url)} ${c.dim("(brain viewer 打开)")}`); } catch {}
   if (!running && existsSync(CFG)) console.log(c.dim("\n起常驻：brain service install"));

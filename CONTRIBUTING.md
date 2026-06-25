@@ -1,6 +1,6 @@
 # Contributing to Klear-Team-Brain
 
-Tuser2s for your interest! Issues and pull requests are welcome.
+Thanks for your interest! Issues and pull requests are welcome.
 
 ## How this repo works
 

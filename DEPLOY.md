@@ -59,6 +59,8 @@ node server/admin.mjs add alice --name "Alice" --server-url https://brain.yourdo
 
 This appends Alice to `team.yaml` + `tokens.yaml`, restarts the service, and prints a `BRAIN-…` **invite code** plus a ready-to-send onboarding message. That invite code is exactly what `brain join` expects in [section 2](#2-clients-each-dev-machine).
 
+> **From your own machine:** once your laptop's `client.config.yaml` has an `admin: { ssh, dir }` block (pointing at the server's SSH target + code dir — see `client.config.example.yaml`), you can run the same thing locally: `brain admin add alice --name "Alice"`. It SSHes in and runs `server/admin.mjs` for you, so you don't need to log into the box. Same for `brain admin who` / `rm` / `org` / `repo` / `gitlab` / `gitea`.
+
 **Manual alternative.** Create the files by hand — copy `team.example.yaml` → `team.yaml`, and `tokens.example.yaml` → `tokens.yaml` with one `openssl rand -hex 24` per member. Members set up this way use the **manual client path** in §2 (raw token in `client.config.yaml`) — `brain join` takes an invite code, not a raw token.
 
 ### 1.4 Pick a durable, backed-up path for the truth store
@@ -66,6 +68,15 @@ This appends Alice to `team.yaml` + `tokens.yaml`, restarts the service, and pri
 ```bash
 export TRUTH_DIR=/var/lib/team-brain/truth   # the authoritative git truth store — back it up
 ```
+
+The truth store is a plain git repo — it's the whole value of the system and **can't be rebuilt**, so back it up. A simple cron-able snapshot:
+
+```bash
+git -C "$TRUTH_DIR" bundle create /backups/truth-$(date +%F).bundle --all   # single-file, restore with: git clone <bundle>
+# or just: tar czf /backups/truth-$(date +%F).tgz -C "$TRUTH_DIR" .
+```
+
+> On a low-RAM VPS, avoid `git gc --aggressive` on the truth store — it can OOM. Plain `git gc` (or letting git auto-gc) is fine.
 
 ### 1.5 HTTPS (easiest: Caddy auto-certs)
 
@@ -102,22 +113,64 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl enable --now team-brain
-curl https://brain.yourdomain.com/health   # {"ok":true}
+curl https://brain.yourdomain.com/health   # {"ok":true,"version":"…","truth":{"dir":true,"git":true,"writable":true}}
 ```
+
+> `/health` does a cheap readiness check of the truth store (exists / is a git repo / writable) and returns **HTTP 503** with the failing field if any check fails — point your uptime monitor at it and alert on non-2xx.
 
 > The server binds `127.0.0.1` by default, so port 8787 is **not** reachable on the public IP — only the Caddy/HTTPS front door is. Keep it that way: if your reverse proxy runs on a different host (e.g. Docker), set `Environment=HOST=0.0.0.0` **and** firewall 8787 so only the proxy can reach it. Never expose 8787 to the internet directly (that bypasses TLS → tokens travel in plaintext).
 
 > Raw sessions are stored unredacted on disk (the redacted `.md` is what the query layer surfaces). Security rests on HTTPS + keeping this host open **only to your circle** + token auth. Don't push the truth store to any public remote.
 
-### 1.7 Optional: GitHub code state
+### 1.7 Optional: code state (GitHub / GitLab / Gitea)
 
-Create `registry.yaml` (copy from `registry.example.yaml`, **secret → gitignored**) to register the GitHub orgs/repos that should become first-class spaces, each with a read-only PAT. A global `GITHUB_TOKEN` (env or `GITHUB_TOKEN_FILE`) is the fallback. With either configured, `read_github` + the 4h code-state poll are enabled.
+Create `registry.yaml` (copy from `registry.example.yaml`, **secret → gitignored**) to register the orgs/repos that should become first-class spaces, each with a read-only PAT. A global `GITHUB_TOKEN` (env or `GITHUB_TOKEN_FILE`) is the fallback. With either configured, `read_github` + the 4h code-state poll are enabled.
 
-### 1.8 Optional: doc mirror (Lark / Feishu)
+Beyond GitHub, **self-hosted GitLab and Gitea** are first-class too — `registry.example.yaml` shows the multi-instance shape (host + base URL + token, with group/project or org/repo entries), and you can maintain them from your own machine with `brain admin gitlab …` / `brain admin gitea …`.
 
-Mirror a Lark/Feishu **wiki** into the truth store (one-way) so the asking agent can `grep`/`read` your team docs alongside sessions and code. Copy `feishu.example.yaml` → `feishu.yaml` (**secret → gitignored**), fill in your custom-app credentials, and restart. Leave it out and the doc layer stays quietly off.
+> Code-state only includes branches pushed within the last **30 days**. Long-lived release branches that go quiet drop out of view — raise the window with `Environment=CODESTATE_ACTIVE_DAYS=365` to keep them. If `GITHUB_TOKEN_FILE` is set but unreadable, the server logs a warning at startup and runs as if no token were configured (so `read_github` would otherwise report a misleading "no permission").
 
-The full walkthrough — creating the app, which scopes to enable, and the **non-obvious whole-wiki authorization step** (you can't add the app directly; you add a *group containing the app's bot* as a wiki admin) — is in the README under *Setting up the doc mirror (Lark / Feishu)*.
+### 1.8 Optional: doc mirror (Feishu/Lark · Notion · Google Docs)
+
+Mirror human-written team docs into the truth store (one-way) so the asking agent can `grep`/`read` them alongside sessions and code. Each source is gated by its own secret yaml (leave it out → that layer stays quietly off), and all follow the same "share with the bot, then it mirrors" model:
+
+- **Feishu / Lark** — copy `feishu.example.yaml` → `feishu.yaml`, fill in your custom-app `app_id`/`app_secret`, restart. The full walkthrough (creating the app, scopes, and the **non-obvious whole-wiki authorization step** — you can't add the app directly; you add a *group containing the app's bot* as a wiki admin) is in the README under *Optional: mirror team docs (Lark / Feishu)*.
+- **Notion** — copy `notion.example.yaml` → `notion.yaml`, fill `api_token`, **share** the pages/databases with your integration, restart.
+- **Google Docs** — copy `google.example.yaml` → `google.yaml`, point it at a service-account JSON key, **share** the docs/folders with the service account's email, restart.
+
+All are **secret → gitignored**. Each polls every `poll_hours` (default 4).
+
+### 1.9 Optional: in-dashboard Q&A (`ASK_ENABLED`)
+
+The web dashboard can host a natural-language "ask one question" box that answers over the truth store. It's **off by default** and spawns a server-side `codex` process per question, so it has cost/latency implications and needs `codex` installed on the server. Enable + tune via env:
+
+| Var | Default | What it does |
+|---|---|---|
+| `ASK_ENABLED` | (off) | Set `1` to enable the `/ask` endpoint + the dashboard Q&A box. |
+| `ASK_CODEX_BIN` | `codex` | Path to the codex binary the server spawns. |
+| `ASK_CODEX_ARGS` | `exec --skip-git-repo-check` | Args passed to codex. |
+| `ASK_CWD` | `TRUTH_DIR` | Working directory (defaults to the truth store, so codex can `grep`/`read` the `.md` directly). |
+| `ASK_TIMEOUT_MS` | `120000` | Per-question timeout. |
+| `ASK_MAX_CONCURRENT` | `2` | Max concurrent questions before returning `429`. |
+
+### 1.10 Environment variables (reference)
+
+Everything the server honors (all optional; sensible defaults shown):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `TRUTH_DIR` | `<repo>/truth-server` | The authoritative git truth store. **Set this to a durable, backed-up path** (§1.4). |
+| `PORT` | `8787` | Listen port. |
+| `HOST` | `127.0.0.1` | Bind address. Keep loopback behind a proxy; only set `0.0.0.0` with a firewall (§1.6). |
+| `TEAM_FILE` | `<repo>/team.yaml` | Roster path. |
+| `TOKENS_FILE` | `<repo>/tokens.yaml` | Member tokens (secret). |
+| `REGISTRY_FILE` | `<repo>/registry.yaml` | Registered orgs/repos + PATs (secret). |
+| `GITHUB_TOKEN` / `GITHUB_TOKEN_FILE` | — | Global fallback GitHub token (§1.7). |
+| `CODESTATE_ACTIVE_DAYS` | `30` | Active-branch window for code-state (§1.7). |
+| `FEISHU_FILE` / `NOTION_FILE` / `GOOGLE_FILE` | `<repo>/<name>.yaml` | Doc-source credentials (§1.8). |
+| `NO_POLL` | (off) | `1` disables all background polling (code-state + doc sources) — useful for static/dev. Note: the Docker image defaults this to `1`. |
+| `PUBLIC_URL` | request `Host` | The base URL baked into the `curl …/get \| bash` install script. **Set it when behind a proxy** so members get the right install URL. |
+| `ASK_*` | — | In-dashboard Q&A (§1.9). |
 
 ---
 
@@ -161,9 +214,14 @@ upload_folders:             # the collection allowlist — the field you'll touc
   - /Users/you/Code/team-stuff   # a session uploads only if its cwd is under one of these
 exclude:                    # subdirectories to keep private
   - /Users/you/Code/team-stuff/secret
+# collect_all: true         # ignore upload_folders and collect ALL sessions on this machine
+                            # (what the installer sets when you pick no workspaces — don't use on machines with secrets/client data)
 codex: true                 # also collect ~/.codex/sessions
+session_history_md: true    # also collect session_history/**/*.md under upload_folders
+trae_memory: true           # also collect Trae's native session memory under upload_folders
 interval_sec: 60            # how often to scan, in seconds
 debounce_sec: 60            # seconds a session must be idle before it's "stable" enough to upload
+# auto_update: false        # default on: the resident self-updates from the server daily; set false to pin
 ```
 
 Day to day only two fields change: add a project to `upload_folders` when you pick it up (not in the list = never uploaded), or add a subdir to `exclude` to keep it private — `brain service restart` after either. `token` and `me.id` are your identity: changing `me.id` breaks per-person lookups, a wrong `token` means `401`. The file holds a secret and is gitignored — never commit it.
@@ -175,11 +233,13 @@ Start with 2 people, run a few days, and check: are searches accurate, is the up
 ## Daily ops
 
 ```bash
-brain status              # resident status + last sync
+brain status              # resident status + last sync + collection footprint (uploaded/skipped)
+brain viewer              # open the local footprint console (127.0.0.1): see/exclude/retract what this machine uploads
 brain logs -f             # collector logs
 brain update              # pull latest client from the server + restart resident
 brain service restart     # restart the resident after config/code changes
 brain uninstall           # stop resident + remove MCP + delete token config
+brain admin add|who|rm    # (admins only, needs the admin: block) manage the roster from your machine over SSH
 ```
 
 ## Troubleshooting

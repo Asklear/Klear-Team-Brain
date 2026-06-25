@@ -1,0 +1,15 @@
+# 团队花名册（公开可提交，不含密钥）。复制成 team.yaml 填真实成员。
+# 身份归一：把每个人本机 git user.name 的各种写法都列进 git_names，
+# 大脑里就能把 session 归到同一个 canonical 成员（作者显示、按人检索靠它）。
+# 每人的接入 token 另放 tokens.yaml（机密、已 gitignore），key = 这里的 id。
+# 加人也可不手写：管理员机器上 `brain admin add <id> --name <显示名> [--email][--git-name]`（经 SSH 落到服务器）。
+members:
+  - id: alice                      # 唯一短 id（= tokens.yaml 的 key、邀请码里的 id）
+    name: Alice Chen               # 显示名
+    email: alice@example.com       # 可选
+    git_names:                     # 本机 git user.name 的各种写法（可留空）
+      - alice
+      - Alice Chen
+  - id: bob
+    name: Bob
+    git_names: [bob]

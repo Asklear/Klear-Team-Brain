@@ -26,7 +26,10 @@ async function runGrep(cmd, args, strip) {
     return { matches: lines.slice(0, MAX_LINES).join("\n").trimEnd(), truncated: lines.length > MAX_LINES };
   } catch (e) {
     if (e.code === 1) return { matches: "", truncated: false };   // 退出码 1 = 无命中（非错误）
-    throw e;
+    // 退出码 ≥2 = grep 自己报错（最常见：正则非法，如未配对括号/悬挂反斜杠）。别把它吞成「无命中」
+    // 也别让 raw execa 错冒成 500 —— 把 stderr 首行清洗后抛出，端点据此回 400，agent 才知道是正则写错了。
+    const detail = (e.stderr || e.message || "").split("\n").map((l) => l.trim()).find(Boolean) || "grep failed";
+    throw new Error(`grep 失败（多半是正则非法，检查模式）：${detail.replace(/^fatal:\s*/i, "")}`);
   }
 }
 
