@@ -71,6 +71,13 @@ code, pre { font-family: var(--font-mono); }
   font-family: var(--font-mono); font-size: var(--fz-meta); cursor: pointer;
 }
 .lang-toggle:hover { border-color: var(--line-soft); color: var(--ink); }
+.local-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 var(--sp-3); flex-shrink: 0;
+  background: var(--surface); border: var(--bw) solid var(--line); border-radius: var(--r-md);
+  color: var(--muted); font-family: var(--font-mono); font-size: var(--fz-meta); cursor: pointer; text-decoration: none;
+}
+.local-btn:hover { border-color: var(--line-soft); color: var(--ink); }
+.local-btn .dot { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--green); }
 .token-chip {
   display: flex; align-items: center; gap: var(--sp-2);
   height: 30px; padding: 0 var(--sp-4); flex-shrink: 0;
