@@ -4,7 +4,7 @@ English | [中文](./CHANGELOG.zh-CN.md)
 
 This project follows [Semantic Versioning](https://semver.org/), formatted after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Check your local version with `brain version`.
 
-> Still pre-1.0 and early, incrementing by patch. Formal versioning began at `v0.1.11`; earlier versions are a retroactive split of the development history by milestone.
+> Still pre-1.0 and early, incrementing by patch. Formal versioning began at `v0.1.11`; earlier versions are a retroactive split of the development history by milestone. `v0.1.12`–`v0.1.13` were internal-only and never released publicly.
 
 ---
 

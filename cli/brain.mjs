@@ -121,7 +121,9 @@ function writeConfig({ server, token, id, name, folders = [], consumer = false, 
       ? `# 未指定工作空间 → 采集本机所有 session（含全部项目）。要收窄改 upload_folders。\ncollect_all: true\nupload_folders: []\n`
       : `upload_folders:\n${folders.map((f) => `  - ${f}`).join("\n")}\n`) +
     `exclude: []\n\n` +
-    `docs: true\ncodex: true\nagentdocs: true\ninterval_sec: 60\ndebounce_sec: 60\n`);
+    // 采集开关：codex / session_history / Trae 原生记忆默认都开（与 client.config.example.yaml 对齐）。
+    // 别再写 docs/agentdocs —— M3 起这两个键没有任何代码读，是历史残留。
+    `codex: true\nsession_history_md: true\ntrae_memory: true\ninterval_sec: 60\ndebounce_sec: 60\n`);
 }
 
 // 从本机 CC session 推测"你常在哪些 git 仓干活"，作为 upload_folders 建议

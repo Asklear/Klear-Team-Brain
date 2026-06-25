@@ -96,11 +96,13 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 | `sessions`    | 按人 + 工作时间检索 session（某人某段时间干了啥）。                          |
 | `stats`       | 按 天/周/人/repo/工具 聚合 token 用量 / session 数 / 对话轮次。           |
 | `log`         | 活动时间线（git 历史；可按 space/author/since 收窄）。                   |
-| `read_github` | 出网现拉某仓代码状态或文件最新内容（代码本体不入库）。                               |
+| `read_github` | 出网现拉 GitHub／GitLab／Gitea（含自建）某仓代码状态或文件最新内容（代码本体不入库）。       |
 
 服务器侧查询全走 `git grep` ／ `git ls-files` ／ `git log` ／ `fs`——**execFile 无 shell、锁死在 `TRUTH_DIR` 内、只读**——**零服务器端 LLM 调用**。
 
 > **接别的编辑器：** MCP 是个 stdio server，命令固定为 `<node> <安装目录>/mcp/server.mjs`（`brain mcp` 会打印你这台的实际路径）。任何支持 MCP 的客户端（Claude Code ／ Codex ／ Gemini CLI ／ Cursor ／ Cline ／ opencode…）加一个 stdio MCP server 即可。
+>
+> **远程／云端 agent（HTTP 传输）：** 跑不了本地 stdio 二进制的 agent，可改用 HTTP 挂载——指向 `https://你的服务器/mcp`，把个人 token 作为 `Bearer` 头带上即可。工具一样，无需本地安装。
 
 ### ② Web GUI 浏览
 
@@ -124,7 +126,7 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 │ ① 采集器 client/sync   │  gzip+token│ ② server/server.mjs(HTTP,前面    │
 │   常驻,盯 AI session    │ ─────────▶ │   可套 Caddy 等做 HTTPS)          │
 │   按白名单闸门只传圈内    │            │   /ingest → git 真相库 TRUTH_DIR   │
-│                        │            │   + 每 4h 拉 GitHub 出 code-state  │
+│                        │            │   + 每 4h 拉代码仓出 code-state    │
 │ 查询 A: 编辑器里问(MCP)  │  搜+拉,综合  │   /grep /find /read /ls /log       │
 │ 查询 B: 浏览器开 Web GUI │ ◀──────────│   + 在 / 托管纯静态看板            │
 └────────────────────────┘            └──────────────────────────────────┘
@@ -135,8 +137,8 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 | 你想知道            | 主要长在               | 怎么进记忆库                           |
 | --------------- | ------------------ | -------------------------------- |
 | **进展 · 思考过程**   | CC/Codex session   | 蒸馏 + 脱敏后存全文 transcript           |
-| **代码现状**        | GitHub             | 不存本体，查询时现拉 + 4h 轮询出 `code-state` |
-| **目标 · 决策（人写）** | 团队文档（Lark/飞书 wiki） | 正文单向镜像，可搜可读；改去源文档                |
+| **代码现状**        | GitHub／GitLab／Gitea（含自建） | 不存本体，查询时现拉 + 4h 轮询出 `code-state` |
+| **目标 · 决策（人写）** | 团队文档（飞书/Lark wiki · Notion · Google Docs） | 正文单向镜像，可搜可读；改去源文档                |
 
 > **设计取舍：** 只有“真相”（原料 + 元数据）被认真存、保持干净——因为它贵且不可重建；“视图”（查询／索引／看板）随时可换可丢。session 以**蒸馏**形态入库（剥内联图片、截巨型 tool 输出，存信号不存字节），字节精确的原文留在产出者本机（`~/.codex` ／ `~/.claude`）。
 
@@ -145,7 +147,8 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 ## 隐私与安全
 
 - **范围闸门：** 只有 session 的 cwd 在你本机 `upload_folders` 白名单内才上传——圈内默认共享、圈外默认私有。
-- **脱敏：** 上传前在客户端就抹掉密钥/token + 家目录路径，服务器投影 `.md` 和 `/read` 出口再各兜底一次。
+- **脱敏：** 上传前在客户端就抹掉密钥/token + 家目录路径，服务器投影 `.md` 和 `/read` 出口再各兜底一次。每个生产者还能维护一份**个人脱敏词表**（客户名、代号…），上传前先抹掉。
+- **生产者透明可控：** 跑 `brain viewer` 打开本机控制台（127.0.0.1，仅你可见），逐条看每个 session 到底传了什么、跳过了什么——可逐条排除、把已进共享库的**撤回**、或加个人脱敏词。
 - **凭证不入库：** 成员 token、GitHub PAT、文档源凭证都住服务器、都 gitignore；花名册（不含密钥）可提交。
 - **记忆库就是全部价值——别 push 到任何公开 remote，并定期备份。** 自托管在只对圈内开放的基础设施上。
 
@@ -171,7 +174,7 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 
 4. **凭证放服务器：** 把 `feishu.example.yaml` 复制成 `feishu.yaml`（含密钥 → 已 gitignore），填好 `app_id` ／ `app_secret`，重启服务。不配则文档层安静关闭。
 
-5. **验证：** 一个轮询周期后，文档会出现在记忆库 `feishu/<知识库>/…` 下，可用 `grep` 搜到。
+5. **验证：** 一个轮询周期后，文档会出现在记忆库 `feishu/<知识库>__<id>/…` 下，可用 `grep` 搜到。
 
 > 国内飞书（`open.feishu.cn`）与国际版 Lark（`open.larksuite.com`）数据隔离——在你团队实际所在的平台建应用。以后每**新建**一个知识库，都要对它重复第 3 步，否则大脑看不见。
 

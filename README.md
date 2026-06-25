@@ -95,11 +95,13 @@ With MCP wired up, ask in plain language inside CC / Codex (*"where did the auth
 | `sessions` | Find sessions by person + work time (who did what, in a given window). |
 | `stats` | Aggregate token usage / session counts / turns by day/week/person/repo/tool. |
 | `log` | Activity timeline (the git history; narrow by space/author/since). |
-| `read_github` | Reach out to GitHub for live code state or a file's current contents (code itself isn't stored). |
+| `read_github` | Reach out to GitHub / GitLab / Gitea (incl. self-hosted) for live code state or a file's current contents (code itself isn't stored). |
 
 Server-side queries run via `git grep` / `git ls-files` / `git log` / `fs` — **execFile, no shell, locked inside `TRUTH_DIR`, read-only** — with **zero server-side LLM calls**.
 
 > **Wiring other editors:** the MCP server is a stdio server; the command is always `<node> <install-dir>/mcp/server.mjs` (`brain mcp` prints your exact path). Add that as a stdio MCP server in Claude Code, Codex, or any MCP-capable client (Gemini CLI / Cursor / Cline / opencode…).
+>
+> **Remote / cloud agents (HTTP transport):** an agent that can't run the local stdio binary can mount the memory over HTTP instead — point it at `https://your-server/mcp` with your member token as a `Bearer` header. Same tools, no local install.
 
 ### ② Browse the web UI
 
@@ -123,7 +125,7 @@ each machine (client)                          your server (self-hosted)
 │ ① collector client/sync │  gzip+token │ ② server/server.mjs (HTTP, HTTPS  │
 │   resident, watches AI   │ ──────────▶ │   via a proxy like Caddy)         │
 │   sessions; gated to the │            │   /ingest → git truth store        │
-│   allowlisted circle     │            │   TRUTH_DIR + 4h GitHub poll →     │
+│   allowlisted circle     │            │   TRUTH_DIR + 4h repo poll →       │
 │                          │            │   code-state                       │
 │ query A: ask in editor   │  search+fetch│  /grep /find /read /ls /log       │
 │ query B: open the web UI │ ◀────────── │   + static dashboard hosted at /  │
@@ -135,8 +137,8 @@ The memory is a single **git repository** fusing three sources — **each captur
 | What you want to know | Lives mainly in | How it enters the memory |
 |---|---|---|
 | **Progress · reasoning** | CC/Codex sessions | distilled + redacted, stored as full-text transcript |
-| **Code state** | GitHub | not stored; fetched on demand + 4h poll into `code-state` |
-| **Goals · decisions (human-written)** | Team docs (Lark/Feishu wiki) | one-way mirror of doc bodies; grep/read it, edit at the source |
+| **Code state** | GitHub / GitLab / Gitea (incl. self-hosted) | not stored; fetched on demand + 4h poll into `code-state` |
+| **Goals · decisions (human-written)** | Team docs (Feishu/Lark wiki · Notion · Google Docs) | one-way mirror of doc bodies; grep/read it, edit at the source |
 
 > **Design trade-off:** only the "truth" (raw material + metadata) is kept clean and complete — because it's expensive and can't be rebuilt; "views" (queries / indexes / the dashboard) are swappable and throwaway. Sessions enter **distilled** (inline images stripped, giant tool outputs truncated — signal, not bytes); the byte-exact original stays on the producer's machine (`~/.codex` / `~/.claude`).
 
@@ -145,7 +147,8 @@ The memory is a single **git repository** fusing three sources — **each captur
 ## Privacy & security
 
 - **Scope gate:** a session is uploaded only if its working directory is under your machine's `upload_folders` allowlist — inside the circle is shared by default, outside is private by default.
-- **Redaction:** secrets/tokens + home-directory paths are stripped **client-side before upload**, with second passes when the server projects the `.md` and at the `/read` exit.
+- **Redaction:** secrets/tokens + home-directory paths are stripped **client-side before upload**, with second passes when the server projects the `.md` and at the `/read` exit. Each producer can also keep a **personal redaction wordlist** (client names, code names…) that's stripped before anything leaves their machine.
+- **Producer transparency & control:** run `brain viewer` for a local console (127.0.0.1, only you can see it) that shows, per session, exactly what was uploaded vs skipped — and lets you exclude individual sessions, **retract** ones already in the shared store, or add personal redaction terms.
 - **Credentials never stored:** member tokens, GitHub PATs, and doc-source credentials all live server-side and are gitignored; the roster (no secrets) can be committed.
 - **The memory is the whole value — never push it to a public remote, and back it up.** Self-host on infrastructure open only to your circle.
 
@@ -166,7 +169,7 @@ If your team keeps human-written docs (goals, decisions, notes) in a Lark/Feishu
 
    The app then has read access to the *entire* wiki (propagation takes ~1–2 minutes).
 4. **Drop credentials on the server:** copy `feishu.example.yaml` → `feishu.yaml` (secret → gitignored), fill in `app_id` / `app_secret`, and restart. Leave it out entirely and the doc layer stays quietly off.
-5. **Verify:** after a poll cycle, the docs appear under `feishu/<wiki>/…` in the memory, searchable via `grep`.
+5. **Verify:** after a poll cycle, the docs appear under `feishu/<wiki>__<id>/…` in the memory, searchable via `grep`.
 
 > China Feishu (`open.feishu.cn`) and international Lark (`open.larksuite.com`) are isolated platforms — create the app on whichever one your team uses. Create a **new** wiki later? Repeat step 3 for it, or the brain won't see it.
 

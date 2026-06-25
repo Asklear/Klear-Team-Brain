@@ -9,7 +9,7 @@ Klear-Team-Brain handles sensitive data: it aggregates redacted full-text transc
 Instead, report privately via one of:
 
 - GitHub's [private vulnerability reporting](https://github.com/Asklear/Klear-Team-Brain/security/advisories/new) (preferred), or
-- email the maintainers at **neiyouser2@gmail.com**.
+- email the maintainers at **neiyohank@gmail.com**.
 
 Please include: a description of the issue, steps to reproduce or a proof of concept, affected versions/components, and any suggested mitigation.
 

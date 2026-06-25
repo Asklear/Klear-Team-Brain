@@ -1,4 +1,4 @@
-# registry —— 登记的代码托管 org/repo + 各自的 PAT/token，决定"有哪些团队 space"（REDESIGN §3.4）。
+# registry —— 登记的代码托管 org/repo + 各自的 PAT/token，决定"有哪些团队 space"（space 模型见 README）。
 # 支持三家：github（顶层，单实例 github.com）/ gitlab / gitea（自建可多实例，见下）。
 # 复制成 registry.yaml 填真实值。registry.yaml 含 PAT → 已 gitignore，别提交（住服务器，跟 tokens.yaml 一样）。
 # 服务器启动加载、改完 systemctl restart 生效。可用 `brain admin org/repo add ... --pat <PAT>` 维护。
