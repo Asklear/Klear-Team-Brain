@@ -256,7 +256,8 @@ async function joinCmd(code) {
   const consume = !!inv.consumer || process.argv.includes("--consume-only");
 
   // 1. 可达 + 鉴权（分清三种失败：连不上服务器 / token 无效 / 网络抖动 —— 别一律说成「邀请码过期」误导排查）
-  const reach = await fetch(srv + "/health").then((r) => r.ok).catch(() => false);
+  // 任意 HTTP 响应都算「连得上」（含 /health 因真相库降级回的 503）—— 只有网络层抛错才是真不可达。
+  const reach = await fetch(srv + "/health").then(() => true).catch(() => false);
   if (!reach) die(`连不上 ${srv}（服务器没起 / 网络 / 代理？先确认地址能在浏览器打开）`);
   let who = null, whoErr = "";
   try {

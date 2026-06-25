@@ -8,6 +8,21 @@ This project follows [Semantic Versioning](https://semver.org/), formatted after
 
 ---
 
+## [0.1.21] - 2026-06-25 · Footprint viewer polish + English activity log
+
+### Fixed
+- Local footprint viewer: sidebar footer is now pinned full-height (previously only on the overview page), and the Activity log is fully in English.
+
+## [0.1.20] - 2026-06-25 · Login-free viewer + device token
+
+### Changed
+- **The local footprint viewer no longer asks for a token to log in** (accessing your own machine from your own machine needs no password); it shows your device token directly instead, and the hosted console gained a "Local console" entry that jumps straight to your on-machine viewer.
+
+## [0.1.19] - 2026-06-25 · Producer footprint viewer
+
+### Added
+- **Producer footprint viewer**: every producer can open a local web page to see exactly which of their sessions were captured and what was uploaded, exclude or retract individual items already in the memory, and maintain a personal redaction wordlist (custom sensitive terms masked before upload) — self-service transparency over what leaves your machine. The installer now bundles `web/viewer.*` (which previously 404'd on real installs), with zero new client dependencies.
+
 ## [0.1.18] - 2026-06-25 · Mount the memory from any agent (HTTP-transport MCP)
 
 ### Added

@@ -4,7 +4,7 @@
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
-import { readFileSync, existsSync, createReadStream, statSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, existsSync, createReadStream, statSync, writeFileSync, mkdtempSync, rmSync, accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -39,6 +39,8 @@ const PORT = Number(process.env.PORT) || 8787;
 // 容器/反代在别的网段时用 HOST=0.0.0.0 显式放开（此时务必靠防火墙/安全组封住该端口）。
 const HOST = process.env.HOST || "127.0.0.1";
 const MAX_BODY = 64 * 1024 * 1024;
+const READ_HARD_MAX = 24 * 1024 * 1024;   // /read 整读护栏：超此值又没带 offset/limit 就拒，免得把巨文件整个读进内存
+const READ_MAX_LINES = 5000;              // /read 没带 limit 时的默认行上限：超了截断并告知总行数，免撑爆 agent 上下文
 // 安全响应头：挂在所有响应上。CSP 锁死外部加载面（脚本只许自身、无 inline）——给渲染不可信内容的 GUI 兜底。
 // style 仍放行 inline（GUI 大量用 style=""）；img 放行 data:（favicon 是内联 svg）。
 const SEC_HEADERS = {
@@ -61,9 +63,15 @@ const WEB_TYPES = {
 const roster = loadRoster(process.env.TEAM_FILE || join(ROOT, "team.yaml"));  // 默认 ROOT/team.yaml；docker 用 TEAM_FILE 指到持久卷
 const tokens = tokenIndex(roster, loadTokens(process.env.TOKENS_FILE || join(ROOT, "tokens.yaml")));
 const registry = loadRegistry(process.env.REGISTRY_FILE || join(ROOT, "registry.yaml"));  // 登记的 github org/repo（启动加载、restart 生效）
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN
-  || (process.env.GITHUB_TOKEN_FILE && existsSync(process.env.GITHUB_TOKEN_FILE)
-      ? readFileSync(process.env.GITHUB_TOKEN_FILE, "utf8").trim() : "");
+// GITHUB_TOKEN：直给优先；否则读 GITHUB_TOKEN_FILE。文件配了却读不到不能静默吞成空——
+// 否则后面 read_github / code-state 会以「无 token」跑、报「无权限」误导排查，启动就警一声。
+const GITHUB_TOKEN = (() => {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  const f = process.env.GITHUB_TOKEN_FILE;
+  if (!f) return "";
+  try { return readFileSync(f, "utf8").trim(); }
+  catch (e) { log.warn("GITHUB_TOKEN_FILE 配了但读不到 → 将以「无 GitHub token」运行（read_github/code-state 受影响）", { file: f, err: e.message }); return ""; }
+})();
 const FEISHU = loadFeishu(process.env.FEISHU_FILE || join(ROOT, "feishu.yaml"));  // 文档层（飞书）凭证：缺则不启用
 const NOTION = loadNotion(process.env.NOTION_FILE || join(ROOT, "notion.yaml"));  // 文档层（Notion）凭证：缺则不启用
 const GOOGLE = loadGoogle(process.env.GOOGLE_FILE || join(ROOT, "google.yaml"));  // 文档层（Google Docs）凭证：缺则不启用
@@ -258,7 +266,16 @@ const server = http.createServer((req, res) => {
 
 async function handle(req, res, u) {
   // --- 健康检查 ---
-  if (req.method === "GET" && u.pathname === "/health") return json(res, 200, { ok: true });
+  // 深一点：光回 200 没意义——真相库不存在 / 不是 git 仓 / 不可写，都该让监控（和 brain join 的可达探测）看见。
+  // 全是 statSync/accessSync 级廉价检查，不扫库，安全频繁打。
+  if (req.method === "GET" && u.pathname === "/health") {
+    const truth = { dir: false, git: false, writable: false };
+    try { truth.dir = existsSync(TRUTH) && statSync(TRUTH).isDirectory(); } catch {}
+    try { truth.git = existsSync(join(TRUTH, ".git")); } catch {}
+    try { accessSync(TRUTH, constants.W_OK); truth.writable = true; } catch {}
+    const ok = truth.dir && truth.git && truth.writable;
+    return json(res, ok ? 200 : 503, { ok, version: CLIENT_VERSION, truth });
+  }
 
   // --- 最新客户端版本（无需鉴权，版本号非机密）：采集器每天自检，比本机高就自动更新 ---
   if (req.method === "GET" && u.pathname === "/version") return json(res, 200, { version: CLIENT_VERSION });
@@ -355,11 +372,19 @@ async function handle(req, res, u) {
     let abs;
     try { abs = safeRelPath(TRUTH, path, "path"); } catch { return json(res, 400, { error: "bad path" }); }
     if (!existsSync(abs)) return json(res, 404, { error: "not found" });
-    if (statSync(abs).isDirectory()) return json(res, 400, { error: "是目录，请用 ls" });
-    let text = redactReadable(readFileSync(abs, "utf8"));
+    const st = statSync(abs);
+    if (st.isDirectory()) return json(res, 400, { error: "是目录，请用 ls" });
     const offset = Math.max(0, Number(u.searchParams.get("offset")) || 0);
     const limit = Number(u.searchParams.get("limit")) || 0;
-    if (offset || limit) text = text.split("\n").slice(offset, limit ? offset + limit : undefined).join("\n");
+    // 大文件护栏：没带 offset/limit 又超硬上限 → 别把整文件读进内存，回提示让 agent 分页或先 grep/find 定位。
+    if (!offset && !limit && st.size > READ_HARD_MAX)
+      return json(res, 413, { error: `文件太大（${(st.size / 1048576).toFixed(1)}MB）：带 offset/limit 分页读，或先用 grep/find 定位再 read 具体段。`, size: st.size });
+    let text = redactReadable(readFileSync(abs, "utf8"));
+    if (offset || limit) { text = text.split("\n").slice(offset, limit ? offset + limit : undefined).join("\n"); return json(res, 200, { path, text }); }
+    // 没带 limit 但行数巨多 → 默认截断并告知总行数，免得一次回几万行撑爆 agent 上下文（带 offset 接着读）。
+    const lines = text.split("\n");
+    if (lines.length > READ_MAX_LINES)
+      return json(res, 200, { path, text: lines.slice(0, READ_MAX_LINES).join("\n"), truncated: true, total_lines: lines.length, hint: `仅回前 ${READ_MAX_LINES} 行；要后面的加 offset=${READ_MAX_LINES}（可继续递增）` });
     return json(res, 200, { path, text });
   }
 

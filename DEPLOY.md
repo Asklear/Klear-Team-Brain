@@ -102,8 +102,10 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl enable --now team-brain
-curl https://brain.yourdomain.com/health   # {"ok":true}
+curl https://brain.yourdomain.com/health   # {"ok":true,"version":"…","truth":{"dir":true,"git":true,"writable":true}}
 ```
+
+> `/health` does a cheap readiness check of the truth store (exists / is a git repo / writable) and returns **HTTP 503** with the failing field if any check fails — point your uptime monitor at it and alert on non-2xx.
 
 > The server binds `127.0.0.1` by default, so port 8787 is **not** reachable on the public IP — only the Caddy/HTTPS front door is. Keep it that way: if your reverse proxy runs on a different host (e.g. Docker), set `Environment=HOST=0.0.0.0` **and** firewall 8787 so only the proxy can reach it. Never expose 8787 to the internet directly (that bypasses TLS → tokens travel in plaintext).
 
@@ -112,6 +114,8 @@ curl https://brain.yourdomain.com/health   # {"ok":true}
 ### 1.7 Optional: GitHub code state
 
 Create `registry.yaml` (copy from `registry.example.yaml`, **secret → gitignored**) to register the GitHub orgs/repos that should become first-class spaces, each with a read-only PAT. A global `GITHUB_TOKEN` (env or `GITHUB_TOKEN_FILE`) is the fallback. With either configured, `read_github` + the 4h code-state poll are enabled.
+
+> Code-state only includes branches pushed within the last **30 days**. Long-lived release branches that go quiet drop out of view — raise the window with `Environment=CODESTATE_ACTIVE_DAYS=365` to keep them. If `GITHUB_TOKEN_FILE` is set but unreadable, the server logs a warning at startup and runs as if no token were configured (so `read_github` would otherwise report a misleading "no permission").
 
 ### 1.8 Optional: doc mirror (Lark / Feishu)
 

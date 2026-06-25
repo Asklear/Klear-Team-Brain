@@ -12,6 +12,10 @@ import { writeSpaceMeta, readSpaceMeta } from "./space.mjs";
 const REPO_PREFIXES = ["github__", "gitlab__", "gitea__"];
 const isRepoKey = (k) => REPO_PREFIXES.some((p) => k.startsWith(p));
 
+// 「活跃分支」窗口：最后 push 超过这么多天的分支不进 code-state。默认 30 天，长命名 release 分支会被滤掉，
+// 用 CODESTATE_ACTIVE_DAYS 调大（如 365）即可纳入。
+const ACTIVE_DAYS = Number(process.env.CODESTATE_ACTIVE_DAYS) || 30;
+
 // 读不到该仓时，写一张显式告警 code-state，让管理员在 read_github / 搜索里一眼看到该补 token/权限。
 function renderNoAccess(spaceKey, provider, ref, status) {
   const why = status === 404 ? "仓库不存在，或该 token 无权访问它（私有仓未纳入授权）"
@@ -52,7 +56,7 @@ function render(spaceKey, ref, rows, pulls, prNote = "") {
   const lines = [`# code-state · ${spaceKey}`, `repo: ${ref}`, ``, `## 活跃分支`];
   for (const r of rows) {
     lines.push(`- **${r.name}** — \`${r.sha}\` ${r.msg}　(${(r.when || "").slice(0, 16)})` +
-      (r.leads ? `　⚠️ **有未推进度**（session ${r.sess.slice(0, 16)} 晚于最后 push，见 sessions/`
+      (r.leads ? `　· **push 后有活动**（session ${r.sess.slice(0, 16)} 晚于最后 push，见 sessions/`
         + `${r.name.replace(/\//g, "-")}/）` : ""));
   }
   lines.push(``, `## Open PR/MR`);
@@ -64,7 +68,7 @@ function render(spaceKey, ref, rows, pulls, prNote = "") {
 }
 
 // 刷新单个团队仓 space：从 space.yaml 取 provider/owner/repo + registry 取 token/baseUrl，按 provider 分发客户端。
-export async function refreshSpace(truthDir, spaceKey, registry, fallbackToken, { activeDays = 30 } = {}) {
+export async function refreshSpace(truthDir, spaceKey, registry, fallbackToken, { activeDays = ACTIVE_DAYS } = {}) {
   const spaceDir = join(truthDir, "spaces", spaceKey);
   const meta = readSpaceMeta(truthDir, spaceKey);
   const { provider, owner, repo, ref } = meta;
