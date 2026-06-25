@@ -19,6 +19,7 @@ import { safeSegment, safeRelPath } from "../core/safe.mjs";
 import { loadFeishu, makeReq } from "../core/feishu.mjs";
 import { initTruth } from "./gitstore.mjs";
 import { ingest } from "./ingest.mjs";
+import { retract } from "./retract.mjs";
 import { refreshAll, enumAndRegisterOrgRepos } from "./codestate.mjs";
 import { readSpaceMeta } from "./space.mjs";
 import { syncFeishuDocs } from "./feishudocs.mjs";
@@ -486,6 +487,21 @@ async function handle(req, res, u) {
     } catch (e) {
       log.error("ingest failed", { who: member.id, id: payload?.id, err: e?.message });
       return json(res, 500, { error: "ingest 失败（详情见服务器日志）" });
+    }
+  }
+
+  // --- retract（撤回自己的 session）---
+  if (req.method === "POST" && u.pathname === "/retract") {
+    const member = authMember(req);
+    if (!member) return json(res, 401, { error: "invalid or missing token" });
+    let payload;
+    try { payload = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: "bad json" }); }
+    try {
+      const r = await retract(TRUTH, payload, member);
+      return json(res, 200, { ok: true, ...r });
+    } catch (e) {
+      log.error("retract failed", { who: member.id, id: payload?.id, err: e?.message });
+      return json(res, 500, { error: "retract 失败（详情见服务器日志）" });
     }
   }
 

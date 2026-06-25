@@ -470,7 +470,20 @@ function status() {
     const last = readFileSync(LOG, "utf8").trimEnd().split("\n").filter((l) => l.includes("·")).slice(-1)[0];
     if (last) console.log(`最近同步: ${c.dim(last)}`);
   }
+  try { const vi = JSON.parse(readFileSync(join(ROOT, ".brain-viewer.json"), "utf8")); if (vi.url) console.log(`查看器:  ${c.ok(vi.url)} ${c.dim("(brain viewer 打开)")}`); } catch {}
   if (!running && existsSync(CFG)) console.log(c.dim("\n起常驻：brain service install"));
+}
+
+// ---------------- viewer（本机足迹查看器）----------------
+// 常驻 sync 内嵌了一个 127.0.0.1 只读小服务（client/viewer.mjs），把地址写进 .brain-viewer.json。
+// 这里读出来用浏览器打开。没在跑就提示先起常驻。
+function viewer() {
+  let info; try { info = JSON.parse(readFileSync(join(ROOT, ".brain-viewer.json"), "utf8")); } catch {}
+  if (!info?.url) die("本机查看器还没起（需要常驻在跑）。先 brain service install（或 brain start），再 brain viewer。");
+  console.log(c.ok("本机足迹查看器：") + " " + info.url + c.dim("  （仅本机可见）"));
+  const opener = IS_MAC ? "open" : "xdg-open";
+  if (has(opener)) sh(opener, [info.url]);
+  else console.log(c.dim("（手动在浏览器打开上面的地址）"));
 }
 function logs(follow) {
   if (!existsSync(LOG)) die("还没有日志（没跑过 sync）");
@@ -495,6 +508,7 @@ const HELP = `brain —— 团队大脑客户端
   brain stop                  停常驻（不卸）
   brain uninstall [--purge]   完整卸载（停常驻+摘MCP+删token配置；--purge 连命令和安装目录）
   brain status                看状态
+  brain viewer                打开本机足迹查看器（127.0.0.1，仅本机可见）
   brain version               看客户端版本
   brain logs [-f]             看日志
   brain admin add <id> --name <显示名> [--email][--git-name][--consumer]   （管理员）加人，吐邀请码
@@ -526,6 +540,7 @@ try {
     case "restart": serviceRestart(); break;
     case "stop": serviceStop(); break;
     case "status": case undefined: status(); break;
+    case "viewer": viewer(); break;                   // 打开本机足迹查看器（常驻内嵌的 127.0.0.1 服务）
     case "logs": logs(flag("-f") || flag("--follow")); break;
     case "version": case "-v": case "--version": console.log(`brain ${CLIENT_VERSION}`); break;
     case "help": case "-h": case "--help": console.log(HELP); break;
