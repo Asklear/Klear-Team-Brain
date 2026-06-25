@@ -168,6 +168,17 @@ If your team keeps human-written docs (goals, decisions, notes) in a Lark/Feishu
 
 > China Feishu (`open.feishu.cn`) and international Lark (`open.larksuite.com`) are isolated platforms — create the app on whichever one your team uses. Create a **new** wiki later? Repeat step 3 for it, or the brain won't see it.
 
+### Other doc sources (Notion · Google Docs)
+
+Doc mirroring is **provider-pluggable** — the same sync engine (`server/docsync.mjs`) backs every source, so each one is just a small adapter (`core/<provider>.mjs` + `server/<provider>docs.mjs`). Two more ship today, both gated by their own `*.yaml` (leave it out → that layer stays off) and both following the same "share with the bot, then it mirrors" model:
+
+- **Notion** — create an *internal integration* at <https://www.notion.so/my-integrations> (read-only); **share** the pages/databases with it (page → ••• → *Connections*); copy `notion.example.yaml` → `notion.yaml`, fill `api_token`, restart. Pages land under `notion/<workspace>/…`.
+- **Google Docs** — create a *service account* (enable the Drive API), download its JSON key, and **share** the docs/folders with the service account's email (read-only); copy `google.example.yaml` → `google.yaml`, point it at the key, restart. Docs land under `google/<workspace>/…`. (Auth is a self-signed JWT — no extra SDK.)
+
+Unshared pages/docs stay invisible (the share is the real access gate); sub-pages and folder contents inherit. After a poll cycle everything is searchable via `grep`.
+
+> Confluence can follow the same adapter shape — contributions welcome.
+
 ---
 
 ## Changelog
