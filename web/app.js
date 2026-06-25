@@ -16,7 +16,7 @@ const I18N = {
   en: {
     // 静态（index.html）
     "doc.title": "team-brain · truth layer",
-    "doc.desc": "The truth layer of the team project brain — browse the whole team's sessions, Feishu docs, code state and activity.",
+    "doc.desc": "The truth layer of the team project brain — browse the whole team's sessions, team docs, code state and activity.",
     "nav.menu": "Menu",
     "brand.tag": "truth layer",
     "search.ph": "grep the team truth repo…  ( / to focus)",
@@ -69,7 +69,7 @@ const I18N = {
     "ov.attentionHead": "⚠️ Needs attention · unpushed",
     "ov.allRepos": "All repos →",
     "ov.recentDocs": "Recent docs",
-    "ov.feishuDocs": "Feishu docs →",
+    "ov.feishuDocs": "Docs →",
     "load.activity": "Loading activity",
     "load.scanCode": "Scanning code state",
     "load.docs": "Loading docs",
@@ -138,7 +138,7 @@ const I18N = {
     // 搜索
     "search.crumb": "Search",
     "search.title": "Search the truth repo",
-    "search.sub": "git grep full-text across all team sessions (redacted transcripts) and Feishu docs. Regex supported.",
+    "search.sub": "git grep full-text across all team sessions (redacted transcripts) and team docs. Regex supported.",
     "search.qPh": "regex / keyword…",
     "search.raw": "incl. raw jsonl",
     "search.btn": "Search",
@@ -156,8 +156,8 @@ const I18N = {
     "act.linkTitle": "Copy web link (share with people, click to open)",
     "act.code": "Code",
     "act.codeTitle": (br) => `Open on GitHub${br ? ` (${br})` : ""}`,
-    "act.feishu": "Feishu",
-    "act.feishuTitle": "Open the original in Feishu",
+    "act.feishu": "Original",
+    "act.feishuTitle": "Open the original (Feishu / Notion / Google Docs)",
     "act.aside": "Aside",
     "act.asideTitle": (n) => `Show / hide assistant asides (${n})`,
     "act.raw": "Raw",
@@ -167,11 +167,11 @@ const I18N = {
     "act.copyFail": "Copy failed",
     "read.agentMsg": (path) => `Read and explain this record with team-brain, as context for the discussion that follows: ${path}`,
     "meta.detail": "Details",
-    "meta.feishuOriginal": "Feishu original ↗",
+    "meta.feishuOriginal": "Original ↗",
     // 文档
-    "docs.noMirror": "No Feishu doc mirror yet.",
-    "docs.noMirrorDesc": "Once the server has feishu.yaml configured and the app added to the wiki, docs auto-mirror in every 4h.",
-    "docs.title": "Feishu docs",
+    "docs.noMirror": "No doc mirror yet.",
+    "docs.noMirrorDesc": "Configure a doc source on the server (feishu.yaml / notion.yaml / google.yaml) and docs auto-mirror in roughly every 4h.",
+    "docs.title": "Team docs",
     "docs.wikis": "Wikis / folders",
     "docs.docs": "Docs",
     "docs.items": (n) => `${n} items`,
@@ -221,7 +221,7 @@ const I18N = {
   },
   zh: {
     "doc.title": "team-brain · 真相层",
-    "doc.desc": "团队项目大脑的真相层 —— 浏览全队 session、飞书文档、代码状态与活动流。",
+    "doc.desc": "团队项目大脑的真相层 —— 浏览全队 session、团队文档、代码状态与活动流。",
     "nav.menu": "菜单",
     "brand.tag": "真相层",
     "search.ph": "grep 全队真相库…  ( / 聚焦)",
@@ -270,7 +270,7 @@ const I18N = {
     "ov.attentionHead": "⚠️ 待关注 · 未推进度",
     "ov.allRepos": "全部仓库 →",
     "ov.recentDocs": "最近文档",
-    "ov.feishuDocs": "飞书文档 →",
+    "ov.feishuDocs": "文档 →",
     "load.activity": "加载活动",
     "load.scanCode": "扫描代码状态",
     "load.docs": "加载文档",
@@ -331,7 +331,7 @@ const I18N = {
     "tag.draft": "个人草稿",
     "search.crumb": "搜索",
     "search.title": "搜索真相库",
-    "search.sub": "git grep 全文检索全队 session（脱敏 transcript）与飞书文档。支持正则。",
+    "search.sub": "git grep 全文检索全队 session（脱敏 transcript）与团队文档。支持正则。",
     "search.qPh": "正则 / 关键词…",
     "search.raw": "连原文 jsonl",
     "search.btn": "搜索",
@@ -348,8 +348,8 @@ const I18N = {
     "act.linkTitle": "复制网页链接（分享给人，点开即看）",
     "act.code": "代码",
     "act.codeTitle": (br) => `在 GitHub 打开${br ? `（${br}）` : ""}`,
-    "act.feishu": "飞书",
-    "act.feishuTitle": "在飞书打开原文",
+    "act.feishu": "原文档",
+    "act.feishuTitle": "在源平台打开原文（飞书 / Notion / Google Docs）",
     "act.aside": "旁白",
     "act.asideTitle": (n) => `显示 / 隐藏过程旁白（${n} 条）`,
     "act.raw": "原文",
@@ -359,10 +359,10 @@ const I18N = {
     "act.copyFail": "复制失败",
     "read.agentMsg": (path) => `用 team-brain 读取并讲解这条记录，作为接下来讨论的上下文：${path}`,
     "meta.detail": "详情",
-    "meta.feishuOriginal": "飞书原文 ↗",
-    "docs.noMirror": "还没有飞书文档镜像。",
-    "docs.noMirrorDesc": "服务器配了 feishu.yaml 并把应用加进知识库后，每 4h 自动镜像进来。",
-    "docs.title": "飞书文档",
+    "meta.feishuOriginal": "原文 ↗",
+    "docs.noMirror": "还没有文档镜像。",
+    "docs.noMirrorDesc": "服务器配好任一文档源（feishu.yaml / notion.yaml / google.yaml）后，每约 4h 自动镜像进来。",
+    "docs.title": "团队文档",
     "docs.wikis": "知识库 / 目录",
     "docs.docs": "文档",
     "docs.items": (n) => `${n} 项`,
@@ -783,16 +783,18 @@ async function viewOverview() {
     </div>
   </div>`;
 
+  // 文档源拉取共用一次扇出（统计格子 + 下方「最近文档」两处复用，避免对每个源重复 /find）
+  const docFilesP = fetchDocFiles(500);
+
   // 统计 + 活动（快）；待关注计数由下方扫描回填
   Promise.all([
     getSpaces(),
     api("/sessions", { limit: 1 }).catch(() => ({ total: 0 })),
     api("/log", { limit: 8 }).catch(() => ({ commits: [] })),
-    api("/ls", { path: "feishu" }).catch(() => ({ entries: [] })),
-  ]).then(([spaces, ses, lg, feishu]) => {
+    docFilesP,
+  ]).then(([spaces, ses, lg, docFiles]) => {
     const active = spaces.filter((e) => isRepoSpace(e.name) && e.active).length;
-    const docs = (feishu.entries || []).reduce((a, e) => a + (e.children || 0), 0);
-    setStat(0, active); setStat(1, ses.total ?? 0); setStat(2, docs);
+    setStat(0, active); setStat(1, ses.total ?? 0); setStat(2, docFiles.length);
     const act = $("#ov-activity");
     if (act) act.innerHTML = (lg.commits || []).length ? timelineHtml(lg.commits) : emptyNote(t("ov.noActivity"));
   });
@@ -818,7 +820,7 @@ async function viewOverview() {
   (async () => {
     const box = $("#ov-docs"); if (!box) return;
     let files = [];
-    try { files = (await api("/find", { path: "feishu", name: "*.md", meta: 1, limit: 200 })).files || []; } catch {}
+    try { files = await docFilesP; } catch {}
     if (!files.length) { box.innerHTML = emptyNote(t("ov.noMirror")); return; }
     const docs = files.map((f) => ({ path: f.path, ...(f.meta || {}) }))
       .sort((a, b) => String(b.edited || "").localeCompare(String(a.edited || ""))).slice(0, 5);
@@ -1286,7 +1288,7 @@ async function viewRead(q) {
     ? actBtn("external", t("act.feishu"), { tag: "a", title: t("act.feishuTitle"), attrs: `href="${esc(meta.url)}" target="_blank" rel="noopener"` }) : "";
   const crumbParts = [crumbHome()];
   if (spaceKey) crumbParts.push(`<a href="${spaceHref(spaceKey)}">${esc(spaceLabel(spaceKey).name)}</a>`);
-  else if (parts[0] === "feishu") crumbParts.push(`<a href="#/docs">${esc(t("nav.docs"))}</a>`);
+  else if (DOC_ROOTS.includes(parts[0])) crumbParts.push(`<a href="#/docs">${esc(t("nav.docs"))}</a>`);
   crumbParts.push(`<span class="cur">${esc(parts[parts.length - 1])}</span>`);
 
   main.innerHTML = `<div class="view view-doc">
@@ -1340,27 +1342,46 @@ function metaCard(meta) {
   }).join("");
 }
 
-/* ============================================================ 文档（飞书） ============================================================ */
+/* ============================================================ 文档（飞书 / Notion / Google Docs） ============================================================ */
+const DOC_ROOTS = ["feishu", "notion", "google"];   // 人写文档镜像子树（与服务端 provider.subtree 对齐）
+
+// 跨所有文档源拉 .md（含 frontmatter meta），供总览统计 / 最近文档用。某源不存在则跳过。
+async function fetchDocFiles(limit = 200) {
+  const lists = await Promise.all(DOC_ROOTS.map((r) =>
+    api("/find", { path: r, name: "*.md", meta: 1, limit }).catch(() => ({ files: [] }))));
+  return lists.flatMap((l) => l.files || []);
+}
+
 async function viewDocs(q) {
-  const path = q.path || "feishu";
+  const path = q.path || "";                          // 空 = 文档源总览（列出存在的 feishu/notion/google 子树）
   main.innerHTML = loading(t("load.docs"));
-  let entries;
-  try { entries = (await api("/ls", { path })).entries || []; }
-  catch (e) {
-    if (e.code === 401) { main.innerHTML = errView(e); return; }
+  const noMirror = () => {
     main.innerHTML = `<div class="view">${crumb(crumbHome(), `<span class="cur">${esc(t("nav.docs"))}</span>`)}
       <div class="notice">${esc(t("docs.noMirror"))}<p class="muted small" style="margin-top:8px">${esc(t("docs.noMirrorDesc"))}</p></div></div>`;
-    highlightSidebar(); return;
+    highlightSidebar();
+  };
+  let entries;
+  try {
+    if (path) entries = (await api("/ls", { path })).entries || [];
+    else {                                            // 总览：ls 真相库根，只留存在的文档源子树
+      const root = (await api("/ls", { path: "" }).catch(() => ({ entries: [] }))).entries || [];
+      entries = root.filter((e) => e.type === "dir" && DOC_ROOTS.includes(e.name));
+    }
+  } catch (e) {
+    if (e.code === 401) { main.innerHTML = errView(e); return; }
+    noMirror(); return;
   }
-  const rel = path.replace(/^feishu\/?/, "");
+  if (!path && !entries.length) { noMirror(); return; }
+  const segs = path ? path.split("/") : [];
+  const join = (a, b) => (a ? a.replace(/\/$/, "") + "/" + b : b);   // path 为空时不带前导斜杠
   const dirs = entries.filter((e) => e.type === "dir");
   const files = entries.filter((e) => e.type === "file" && e.name.endsWith(".md"));
-  const segCrumbs = rel ? rel.split("/").map((seg, i, arr) => { const p = "feishu/" + arr.slice(0, i + 1).join("/"); return i === arr.length - 1 ? `<span class="cur">${esc(kbName(seg))}</span>` : `<a href="#/docs?path=${enc(p)}">${esc(kbName(seg))}</a>`; }) : [];
+  const segCrumbs = segs.map((seg, i) => { const p = segs.slice(0, i + 1).join("/"); return i === segs.length - 1 ? `<span class="cur">${esc(kbName(seg))}</span>` : `<a href="#/docs?path=${enc(p)}">${esc(kbName(seg))}</a>`; });
   main.innerHTML = `<div class="view">
     ${crumb(crumbHome(), `<a href="#/docs">${esc(t("nav.docs"))}</a>`, ...segCrumbs)}
-    <div class="page-head"><h1>${rel ? esc(kbName(rel.split("/").pop())) : esc(t("docs.title"))}</h1></div>
-    ${dirs.length ? `<div class="section-head"><h2>${esc(t("docs.wikis"))}</h2></div><div class="cards" style="margin-bottom:var(--sp-9)">${dirs.map((d) => `<a class="card" href="#/docs?path=${enc(path.replace(/\/$/, "") + "/" + d.name)}"><div class="ct"><span class="name">📚 ${esc(kbName(d.name))}</span></div><div class="cmeta">${esc(t("docs.items", d.children ?? 0))}</div></a>`).join("")}</div>` : ""}
-    ${files.length ? `<div class="section-head"><h2>${esc(t("docs.docs"))}</h2></div><div class="list">${files.map((f) => `<a class="row" href="#/read?path=${enc(path.replace(/\/$/, "") + "/" + f.name)}"><div class="r-prev">📄 ${esc(docName(f.name))}</div></a>`).join("")}</div>` : ""}
+    <div class="page-head"><h1>${segs.length ? esc(kbName(segs[segs.length - 1])) : esc(t("docs.title"))}</h1></div>
+    ${dirs.length ? `<div class="section-head"><h2>${esc(t("docs.wikis"))}</h2></div><div class="cards" style="margin-bottom:var(--sp-9)">${dirs.map((d) => `<a class="card" href="#/docs?path=${enc(join(path, d.name))}"><div class="ct"><span class="name">📚 ${esc(kbName(d.name))}</span></div><div class="cmeta">${esc(t("docs.items", d.children ?? 0))}</div></a>`).join("")}</div>` : ""}
+    ${files.length ? `<div class="section-head"><h2>${esc(t("docs.docs"))}</h2></div><div class="list">${files.map((f) => `<a class="row" href="#/read?path=${enc(join(path, f.name))}"><div class="r-prev">📄 ${esc(docName(f.name))}</div></a>`).join("")}</div>` : ""}
     ${!dirs.length && !files.length ? emptyNote(t("docs.empty")) : ""}
   </div>`;
   highlightSidebar();

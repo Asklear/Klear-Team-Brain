@@ -173,6 +173,17 @@ npm run sync -- --once    # 收一次（或 `npm run sync` 让它在后台持续
 
 > 国内飞书（`open.feishu.cn`）与国际版 Lark（`open.larksuite.com`）数据隔离——在你团队实际所在的平台建应用。以后每**新建**一个知识库，都要对它重复第 3 步，否则大脑看不见。
 
+### 其它文档源（Notion · Google Docs）
+
+文档镜像是**可插拔多源**的——所有源共用同一套同步引擎（`server/docsync.mjs`），每个源只是一个小 adapter（`core/<源>.mjs` + `server/<源>docs.mjs`）。现已多支持两个源，各由自己的 `*.yaml` 把关（不建即不启用），都遵循"把内容 share 给机器人、它就镜像"的模型：
+
+- **Notion** —— 在 <https://www.notion.so/my-integrations> 建一个 *internal integration*（只读）；把页面/数据库 **share** 给它（页面 → ••• → *Connections*）；复制 `notion.example.yaml` → `notion.yaml`，填 `api_token`，重启。页面落到 `notion/<workspace>/…`。
+- **Google Docs** —— 建一个 *service account*（启用 Drive API），下载 JSON key，把文档/文件夹 **share** 给该 service account 的邮箱（只读）；复制 `google.example.yaml` → `google.yaml`，指向 key，重启。文档落到 `google/<workspace>/…`。（认证用自签 JWT，不引入额外 SDK。）
+
+没 share 的页面/文档看不到（share 才是真正的授权闸）；子页面、文件夹内容继承。一轮后即可 `grep` 搜到。
+
+> Confluence 可按同一 adapter 范式接入——欢迎贡献。
+
 ---
 
 ## 更新日志

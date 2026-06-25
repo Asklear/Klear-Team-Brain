@@ -17,11 +17,15 @@ import { log } from "../core/log.mjs";
 import { CLIENT_VERSION } from "../core/version.mjs";   // 服务器自身版本 == 打进 /client.tgz 的版本（启动重打包）→ 权威「最新客户端版本」
 import { safeSegment, safeRelPath } from "../core/safe.mjs";
 import { loadFeishu, makeReq } from "../core/feishu.mjs";
+import { loadNotion, makeReq as makeNotionReq } from "../core/notion.mjs";
+import { loadGoogle, makeReq as makeGoogleReq } from "../core/google.mjs";
 import { initTruth } from "./gitstore.mjs";
 import { ingest } from "./ingest.mjs";
 import { refreshAll, enumAndRegisterOrgRepos } from "./codestate.mjs";
 import { readSpaceMeta } from "./space.mjs";
 import { syncFeishuDocs } from "./feishudocs.mjs";
+import { syncNotionDocs } from "./notiondocs.mjs";
+import { syncGoogleDocs } from "./googledocs.mjs";
 import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, statsTruth, frontmatterOf, spaceStatsTruth } from "./query.mjs";
 import { canonicalizePath, canonicalSpaceKey } from "../core/identity.mjs";
 
@@ -59,6 +63,8 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN
   || (process.env.GITHUB_TOKEN_FILE && existsSync(process.env.GITHUB_TOKEN_FILE)
       ? readFileSync(process.env.GITHUB_TOKEN_FILE, "utf8").trim() : "");
 const FEISHU = loadFeishu(process.env.FEISHU_FILE || join(ROOT, "feishu.yaml"));  // 文档层（飞书）凭证：缺则不启用
+const NOTION = loadNotion(process.env.NOTION_FILE || join(ROOT, "notion.yaml"));  // 文档层（Notion）凭证：缺则不启用
+const GOOGLE = loadGoogle(process.env.GOOGLE_FILE || join(ROOT, "google.yaml"));  // 文档层（Google Docs）凭证：缺则不启用
 initTruth(TRUTH);
 
 // 「问一句」理解层（可选）：复用服务器上已装的 codex（或任意 agent CLI）当引擎。
@@ -73,7 +79,7 @@ const ASK = {
   max: Number(process.env.ASK_MAX_CONCURRENT) || 2,          // 并发上限，挡住成本/滥用
 };
 let askInflight = 0;
-const ASK_HINT = "你在团队大脑「真相库」（一个 git 仓）当前目录里回答问题。库里有：spaces/<repo>/sessions/**/*.md（全队脱敏对话 transcript）、feishu/**/*.md（飞书文档镜像）、spaces/<repo>/code-state.md（代码状态）。请用 grep/read 翻这些 .md 文件，给出综合答复，并在末尾列出你引用的文件 path。不要读 .jsonl（用 .md）。问题：\n\n";
+const ASK_HINT = "你在团队大脑「真相库」（一个 git 仓）当前目录里回答问题。库里有：spaces/<repo>/sessions/**/*.md（全队脱敏对话 transcript）、feishu/·notion/·google/**/*.md（人写文档镜像：飞书 wiki / Notion / Google Docs）、spaces/<repo>/code-state.md（代码状态）。请用 grep/read 翻这些 .md 文件，给出综合答复，并在末尾列出你引用的文件 path。不要读 .jsonl（用 .md）。问题：\n\n";
 // 从 codex 输出里抽最终答复：--json 模式解 JSONL 取末条 agent 消息；否则直接回 stdout。
 const extractAnswer = (out) => {
   const s = String(out || "").trim();
@@ -294,7 +300,7 @@ async function handle(req, res, u) {
   // --- 能力位（Web GUI 据此决定显隐可选功能）---
   if (req.method === "GET" && u.pathname === "/capabilities") {
     if (!authMember(req)) return json(res, 401, { error: "invalid token" });
-    return json(res, 200, { ask: ASK.enabled, feishu: !!FEISHU });
+    return json(res, 200, { ask: ASK.enabled, feishu: !!FEISHU, notion: !!NOTION, google: !!GOOGLE });
   }
 
   // --- 「问一句」：spawn 服务器上的 codex 现查真相库 → 综合答复（可选，ASK_ENABLED 才开）---
@@ -500,7 +506,7 @@ log.info(ASK.enabled ? "[ask] 「问一句」已启用" : "[ask] 「问一句」
 
 // 本地静态开发模式：NO_POLL=1 跳过两个后台轮询（不出网、不改写 TRUTH）→ 拿静态 fixtures 开发 web GUI
 const NO_POLL = process.env.NO_POLL === "1";
-if (NO_POLL) log.info("[no-poll] 后台轮询已关（NO_POLL=1）：code-state / feishu 同步跳过，TRUTH 保持静态");
+if (NO_POLL) log.info("[no-poll] 后台轮询已关（NO_POLL=1）：code-state / feishu / notion / google 同步跳过，TRUTH 保持静态");
 
 // code-state 4h 轮询（registry 有任一 provider 登记、或配了全局 GITHUB_TOKEN 就启用）
 if (!NO_POLL && (GITHUB_TOKEN || hasAnyRemote(registry))) {
@@ -518,15 +524,23 @@ if (!NO_POLL && (GITHUB_TOKEN || hasAnyRemote(registry))) {
   log.info("[code-state] 未配 registry 也无 GITHUB_TOKEN → code-state 轮询 / read_github 暂不启用");
 }
 
-// 飞书文档镜像轮询（配了 feishu.yaml 就启用）：单向拉 wiki 正文进 feishu/ 子树，grep/read 即可搜
-if (!NO_POLL && FEISHU) {
-  const freq = makeReq(FEISHU);
-  const ftick = () => syncFeishuDocs(TRUTH, freq, { wikiBase: FEISHU.wiki_base })
-    .then((r) => log.info("[feishu-docs] 同步完成", { spaces: r.spaces, written: r.written, pruned: r.pruned, skipped: r.skipped, errors: r.errors }))
-    .catch((e) => log.error("[feishu-docs] 失败", { err: e.message }));
-  setTimeout(ftick, 60_000);                              // 启动 60s 后首跑（错开 code-state 的 30s）
-  setInterval(ftick, FEISHU.poll_hours * 3600 * 1000);
-  log.info("[feishu-docs] 轮询已开", { hours: FEISHU.poll_hours });
-} else {
-  log.info("[feishu-docs] 未配 feishu.yaml → 文档层暂不启用");
+// 文档源镜像轮询：配了对应 *.yaml 就启用，单向拉正文进 <子树>/，grep/read 即可搜。
+// 各源同一形态（增量对账引擎在 docsync.mjs），用一张表驱动——加新源只加一行，错峰首跑避免一起出网。
+const DOC_SOURCES = [
+  { label: "feishu", file: "feishu.yaml", cfg: FEISHU, makeReq, sync: syncFeishuDocs, opts: (c) => ({ wikiBase: c.wiki_base }), offset: 60_000 },
+  { label: "notion", file: "notion.yaml", cfg: NOTION, makeReq: makeNotionReq, sync: syncNotionDocs, opts: (c) => ({ workspace: c.workspace }), offset: 90_000 },
+  { label: "google", file: "google.yaml", cfg: GOOGLE, makeReq: makeGoogleReq, sync: syncGoogleDocs, opts: (c) => ({ workspace: c.workspace }), offset: 120_000 },
+];
+for (const s of DOC_SOURCES) {
+  if (!NO_POLL && s.cfg) {
+    const req = s.makeReq(s.cfg);
+    const tick = () => s.sync(TRUTH, req, s.opts(s.cfg))
+      .then((r) => log.info(`[${s.label}-docs] 同步完成`, { collections: r.collections, written: r.written, pruned: r.pruned, skipped: r.skipped, errors: r.errors }))
+      .catch((e) => log.error(`[${s.label}-docs] 失败`, { err: e.message }));
+    setTimeout(tick, s.offset);                            // 启动后错峰首跑（code-state 30s 之后，各源 60/90/120s）
+    setInterval(tick, s.cfg.poll_hours * 3600 * 1000);
+    log.info(`[${s.label}-docs] 轮询已开`, { hours: s.cfg.poll_hours });
+  } else {
+    log.info(`[${s.label}-docs] 未配 ${s.file} → 文档层暂不启用`);
+  }
 }

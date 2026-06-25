@@ -1,0 +1,16 @@
+# 复制成 notion.yaml（服务器级、已 gitignore——含 integration token）。
+# 不建该文件 / 不填 api_token → Notion 文档层不启用（与 feishu.yaml 同款"缺省即关"）。
+#
+# 准备（一次性）：
+#   1. 到 https://www.notion.so/my-integrations 建一个 internal integration，
+#      拿 "Internal Integration Secret"（只需 Read content 权限）。
+#   2. 把要镜像的页面/数据库 share 给该 integration：
+#      目标页面右上 ··· → Connections（连接）→ 选你建的 integration。
+#      —— 这步才是真正的授权闸：没 share 的页面 integration 看不到；子页面随父页面继承。
+#   3. 填下面的 api_token，重启 server。启动 90s 后首跑，一轮后页面落到
+#      notion/<workspace>/<标题>--<page_id>.md，grep/read 即可搜（正文已脱敏）。
+#
+# 正本永远在 Notion（人在那读写），这棵子树只是可重建的只读检索镜像——要改去 Notion 改。
+api_token: secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+poll_hours: 4              # 轮询间隔（小时），可选，默认 4
+workspace: notion         # 真相库 notion/ 下的目录名（Notion API 不提供工作区名，自己起一个，可选）
