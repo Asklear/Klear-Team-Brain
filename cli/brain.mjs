@@ -467,8 +467,14 @@ function status() {
     console.log(`常驻:    ${running ? c.ok(a) : c.warn(a || "未装")}`);
   }
   if (existsSync(LOG)) {
-    const last = readFileSync(LOG, "utf8").trimEnd().split("\n").filter((l) => l.includes("·")).slice(-1)[0];
-    if (last) console.log(`最近同步: ${c.dim(last)}`);
+    // 取最近一条 tick（logfmt：`<ts> INFO  tick cc_up=… …`），只显示时间 + 计数体，别再匹配老格式的「·」
+    const lines = readFileSync(LOG, "utf8").trimEnd().split("\n");
+    const last = [...lines].reverse().find((l) => / tick /.test(l));
+    if (last) {
+      const ts = (last.match(/^(\S+)/) || [])[1] || "";
+      const body = last.split(" tick ")[1] || last;
+      console.log(`最近同步: ${c.dim((ts.slice(11, 19) + " " + body).trim())}`);
+    }
   }
   try { const vi = JSON.parse(readFileSync(join(ROOT, ".brain-viewer.json"), "utf8")); if (vi.url) console.log(`查看器:  ${c.ok(vi.url)} ${c.dim("(brain viewer 打开)")}`); } catch {}
   if (!running && existsSync(CFG)) console.log(c.dim("\n起常驻：brain service install"));
