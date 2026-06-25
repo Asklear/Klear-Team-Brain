@@ -107,8 +107,11 @@ function buildClientTarball() {
     stage = mkdtempSync(join(tmpdir(), "tb-client-"));
     writeFileSync(join(stage, "package.json"), JSON.stringify(clientPkg, null, 2) + "\n");
     // tar 多个 -C：代码取自 ROOT，package.json 取自 stage（GNU/BSD tar 都支持）。
+    // web 只带本机查看器那两个文件（viewer.html/js，~44K，CSS 已内联、无外链字体）；
+    // 绝不带 web/fonts、web/app.* —— 那是线上服务端查看器，server-only，会把装机包撑肥。
     execFileSync("tar", ["czf", CLIENT_TGZ,
       "-C", ROOT, "core", "client", "mcp", "cli", "install.sh", "client.config.example.yaml",
+      "web/viewer.html", "web/viewer.js",
       "-C", stage, "package.json"], { stdio: "ignore" });
     log.info("[client] 已打包客户端", { path: CLIENT_TGZ });
   } catch (e) { log.warn("[client] 打包失败", { err: e.message }); }
