@@ -90,6 +90,8 @@ brain.yourdomain.com {
 
 Point the domain's A record at this VPS; Caddy issues and renews certs automatically.
 
+> The reverse proxy forwards everything on the host, so `POST https://brain.yourdomain.com/mcp` (the HTTP-transport MCP endpoint for remote/cloud agents — see [README](./README.md)) is reachable with no extra config — it shares the same member tokens as every other endpoint. Server-side only (no CORS): point agents at it, not browsers.
+
 ### 1.6 Run as a service (systemd)
 
 `/etc/systemd/system/team-brain.service`:

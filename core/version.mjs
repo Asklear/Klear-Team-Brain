@@ -17,4 +17,6 @@ export const CLIENT_VERSION = v;
 //   3 → ① redact 不再误伤数值型 token 计数（input_tokens 等 ≥8 位曾被抹成 [REDACTED_SECRET]、还破坏 JSON →
 //        重度 Codex 用户 token 统计为 0）；② slim 每北京日留末条 token_count、parse 作差 → Codex token 按天精确。
 //        两者都只能从本机原文捞回 → 重收 Codex 历史。
-export const PIPELINE_VERSION = 3;
+//   4 → slim 不再把 session_history *.md 文档当 tool 输出截成头尾 3KB（之前 >3KB 的文档中段全丢）。
+//        原文还在 upload_folders → 重收 session_history *.md 以补回整篇正文。
+export const PIPELINE_VERSION = 4;

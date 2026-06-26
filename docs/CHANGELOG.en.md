@@ -8,6 +8,13 @@ This project follows [Semantic Versioning](https://semver.org/), formatted after
 
 ---
 
+## [0.1.23] - 2026-06-26 · Full-length session_history docs + HTTP MCP works with any client
+
+### Fixed
+- **`session_history` `*.md` docs are no longer truncated to ~3KB**: the upload-time slimmer treated whole human/agent-written docs as tool output and capped them to a 2KB head + 1KB tail, gutting the middle of anything longer (e.g. `agent-task-*.md` specs). `slimCC` now keeps `session_history_markdown` / `session_history_meta` records in full (images/base64 are still stripped; oversized docs are still bounded by the existing `MAX_RAW` / `MAX_UPLOAD` size gates). A pipeline-generation bump (3 → 4) re-collects affected `*.md` from `upload_folders` so the lost body is restored on next sync.
+- **Secret redaction spares obvious placeholders/identifiers**: doc text like `token: example-token-here`, `api_key: YOUR_API_KEY_HERE`, `<your-token>`, `changeme-…`, `xxxx…` is no longer masked to `[REDACTED_SECRET]`. Both the JSON-safe `ASSIGN_JSONL` rule and the markdown `GENERIC_RULE` now skip a placeholder allowlist before redacting. Real, high-entropy secrets are still masked — this is a conservative tightening, so example values that genuinely look like real keys are still redacted.
+- **HTTP-transport MCP (`POST /mcp`) works with bare HTTP clients**: the Streamable-HTTP SDK rejected anything not sending `Accept: application/json, text/event-stream` + `Content-Type: application/json` (so plain `curl` / hand-written bots got `406` / `415`), and a `GET /mcp` hung the connection on the stateless endpoint. `/mcp` now pins those headers on the inbound request (via `rawHeaders`, which the underlying Hono request-builder actually reads) and returns `405` for non-`POST`, so "URL + Bearer token" mounts the memory from any client. Docs: README now has copy-paste Claude Code / `mcp.json` / `curl` config; DEPLOY notes the endpoint rides the same HTTPS proxy + member tokens.
+
 ## [0.1.22] - 2026-06-25 · Hardened read-only queries + observable status
 
 ### Added

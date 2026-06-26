@@ -8,6 +8,13 @@
 
 ---
 
+## [0.1.23] - 2026-06-26 · session_history 文档不再被截断 + HTTP MCP 任意客户端都能连
+
+### 修复
+- **`session_history` `*.md` 文档不再被截成 ~3KB**：上传前的蒸馏把整篇人/agent 写的文档当成 tool 输出，截成头 2KB + 尾 1KB，超过的中段全丢（如 `agent-task-*.md` 这类方案文档）。`slimCC` 现在对 `session_history_markdown` / `session_history_meta` 整篇保留（图片/base64 仍剥；超大文档仍由 `MAX_RAW` / `MAX_UPLOAD` 大小闸门挡）。流水线代次 3 → 4，下次同步会从 `upload_folders` 重收受影响的 `*.md`，补回丢掉的正文。
+- **脱敏放行明显的占位/标识符**：文档里 `token: example-token-here`、`api_key: YOUR_API_KEY_HERE`、`<your-token>`、`changeme-…`、`xxxx…` 这类不再被抹成 `[REDACTED_SECRET]`。保结构的 `ASSIGN_JSONL` 与 markdown 的 `GENERIC_RULE` 在脱敏前都先过一遍占位放行清单。真·高熵密钥照常抹——这是保守的一档收紧，所以长得像真密钥的示例值仍会被抹。
+- **HTTP 传输的 MCP（`POST /mcp`）裸客户端也能连**：Streamable-HTTP 的 SDK 强制要 `Accept: application/json, text/event-stream` + `Content-Type: application/json`，否则 `406` / `415`（裸 `curl` / 手写 bot 默认头会被挡）；无状态端点上 `GET /mcp` 还会挂住连接。现在 `/mcp` 在入口把这些头钉到请求上（改 `rawHeaders`——底层 Hono 重建请求实际读它，改 `headers` 无效），非 `POST` 一律 `405`，「URL + Bearer token」从任意客户端都能挂载。文档：README 补了 Claude Code / `mcp.json` / `curl` 的可复制配置；DEPLOY 说明该端点走同一套 HTTPS 反代 + 成员 token。
+
 ## [0.1.22] - 2026-06-25 · 只读查询加固 + status 看得见采集足迹
 
 ### 新增

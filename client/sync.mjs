@@ -68,16 +68,20 @@ function loadState() {
 }
 
 // 流水线升级 → 一次性重收受影响的历史（与"范围变了清 seen"同一套路）。
-// 历来场景都在 Codex：代次 2 = slim 之前整丢 token_count；代次 3 = redact 误抹数值型 token 计数（统计为 0）
-//   + slim 改每北京日留末条 token_count（Codex token 按天精确）。都得用新 slim/redact 重新蒸馏才补得回。
-// 只清【Codex】的 seen（本机原文还在 ~/.codex）→ 重传量最小；CC 历史的 token 在服务端 rebuild-cards 补，不必重传。
+// 代次 2 = slim 之前整丢 token_count；代次 3 = redact 误抹数值型 token 计数（统计为 0）+ slim 每北京日留末条
+//   token_count（Codex token 按天精确）→ 都只能从本机 ~/.codex 原文重新蒸馏捞回，故清【Codex】seen。
+// 代次 4 = slim 不再把 session_history *.md 截成头尾 3KB → 原文还在 upload_folders，清这些 .md 的 seen 重收整篇。
+// 只清受影响来源的 seen（本机原文还在）→ 重传量最小；CC 历史的 token 在服务端 rebuild-cards 补，不必重传。
 function reconcilePipeline() {
   if (prevPipeline >= PIPELINE_VERSION) return;
-  let cleared = 0;
+  let codex = 0, history = 0;
   for (const file of [...seenSession.keys()]) {
-    if (file.startsWith(CODEX_ROOT)) { seenSession.delete(file); cleared++; }
+    if (file.startsWith(CODEX_ROOT)) { seenSession.delete(file); codex++; }
+    // session_history 文档：upload_folders 内 session_history/ 下的 *.md（CC/Codex/Trae 的 seen key 都是 .jsonl）。
+    // 按「session_history/ 目录 + .md」认，比单看后缀稳——不会误清将来可能进 seen 的其它 .md。
+    else if (file.endsWith(".md") && /[\\/]session_history[\\/]/.test(file)) { seenSession.delete(file); history++; }
   }
-  if (cleared) log.info("[pipeline-upgrade] generation bumped -> re-collect Codex history (recover token usage)", { from: prevPipeline, to: PIPELINE_VERSION, codex_resync: cleared });
+  if (codex || history) log.info("[pipeline-upgrade] generation bumped -> re-collect affected history", { from: prevPipeline, to: PIPELINE_VERSION, codex_resync: codex, session_history_resync: history });
   prevPipeline = PIPELINE_VERSION;
 }
 
