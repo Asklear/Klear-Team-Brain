@@ -101,7 +101,28 @@ Server-side queries run via `git grep` / `git ls-files` / `git log` / `fs` — *
 
 > **Wiring other editors:** the MCP server is a stdio server; the command is always `<node> <install-dir>/mcp/server.mjs` (`brain mcp` prints your exact path). Add that as a stdio MCP server in Claude Code, Codex, or any MCP-capable client (Gemini CLI / Cursor / Cline / opencode…).
 >
-> **Remote / cloud agents (HTTP transport):** an agent that can't run the local stdio binary can mount the memory over HTTP instead — point it at `https://your-server/mcp` with your member token as a `Bearer` header. Same tools, no local install.
+> **Remote / cloud agents (HTTP transport):** an agent that can't run the local stdio binary can mount the memory over HTTP instead — same tools, no local install. Point any MCP client at `POST https://your-server/mcp` with your member token as a `Bearer` header.
+>
+> Claude Code:
+> ```bash
+> claude mcp add --transport http team-brain https://your-server/mcp \
+>   --header "Authorization: Bearer <your-member-token>"
+> ```
+> Cursor / Cline / any `mcp.json`:
+> ```json
+> { "mcpServers": { "team-brain": {
+>   "type": "http",
+>   "url": "https://your-server/mcp",
+>   "headers": { "Authorization": "Bearer <your-member-token>" }
+> } } }
+> ```
+> Smoke-test from a shell (the endpoint accepts plain JSON-RPC — no special `Accept` header needed):
+> ```bash
+> curl -s https://your-server/mcp -H "Authorization: Bearer <token>" \
+>   -H "Content-Type: application/json" \
+>   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+> ```
+> It's a stateless, one-shot endpoint (POST in, JSON out — no session, no server-side LLM); multi-turn context stays on the calling agent's side.
 
 ### ② Browse the web UI
 

@@ -29,7 +29,7 @@ import { syncNotionDocs } from "./notiondocs.mjs";
 import { syncGoogleDocs } from "./googledocs.mjs";
 import { grepTruth, findTruth, lsTruth, logTruth, sessionsTruth, statsTruth, frontmatterOf, spaceStatsTruth } from "./query.mjs";
 import { canonicalizePath, canonicalSpaceKey } from "../core/identity.mjs";
-import { makeMcpHttpHandler } from "./mcphttp.mjs";
+import { makeMcpHttpHandler, normalizeMcpRequest } from "./mcphttp.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TRUTH = process.env.TRUTH_DIR || join(ROOT, "truth-server");
@@ -315,11 +315,11 @@ async function handle(req, res, u) {
   // 鉴权复用 authMember（与所有 query 端点同一套成员 token）。无状态：POST 带 JSON-RPC 体，传输回 JSON。
   if (u.pathname === "/mcp") {
     if (!authMember(req)) return json(res, 401, { error: "invalid token" });
+    // 非 POST（含会挂住连接的 GET SSE）→ 405；POST 则把 Accept/Content-Type 钉成 SDK 要的规范头（见 normalizeMcpRequest）。
+    if (!normalizeMcpRequest(req)) { res.setHeader("allow", "POST"); return json(res, 405, { error: "method not allowed; POST only" }); }
     let body;
-    if (req.method === "POST") {
-      try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: "bad json" }); }
-    }
-    return mcpHandler(req, res, body);   // transport 自行按 method(POST/GET/DELETE) 处理
+    try { body = JSON.parse(await readBody(req)); } catch { return json(res, 400, { error: "bad json" }); }
+    return mcpHandler(req, res, body);
   }
 
   // --- 校验 token 身份（brain join 自检用）---

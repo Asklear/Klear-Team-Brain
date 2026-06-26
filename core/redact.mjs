@@ -16,8 +16,14 @@ export const PREFIX_RULES = [
   [/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "[REDACTED_JWT]"],
 ];
 
+// 占位/示例值放行：文档正文里 YOUR_API_KEY_HERE、<token>、changeme、example-xxx、xxxx… 这类明显是
+// 占位符/标识符、绝不是真密钥 → 不脱敏（纯精度收益，不抬漏抹风险）。整段值匹配、大小写无关。
+const PLACEHOLDER = /^(?:x{3,}|\*{3,}|\.{3,}|-{3,}|<[^>]*>|\{\{?[^}]*\}?\}|your[_-].*|my[_-].*|example[_.-].*|placeholder.*|change[_-]?me.*|redacted.*|todo.*|dummy.*|sample.*|test[_-].*|none|null|undefined|true|false|enabled|disabled)$/i;
+
 // 「赋值型」兜底（贪婪，吃掉「键名+值」整段）：只给 markdown/纯文本用（不保 JSON 结构）。
-const GENERIC_RULE = [/(?:Bearer|token|api[_-]?key|password|secret)["'\s:=]+[A-Za-z0-9._\-]{12,}/gi, "[REDACTED_SECRET]"];
+// 值单列一组，便于放行占位符；命中真密钥时整段（键名+值）一起换占位符。
+const GENERIC_RULE = [/((?:Bearer|token|api[_-]?key|password|secret)["'\s:=]+)([A-Za-z0-9._\-]{12,})/gi,
+  (m, _head, val) => (PLACEHOLDER.test(val) ? m : "[REDACTED_SECRET]")];
 export const RULES = [...PREFIX_RULES, GENERIC_RULE];
 
 export const redact = (s) => RULES.reduce((a, [re, to]) => a.replace(re, to), s || "");
@@ -36,7 +42,7 @@ const URL_CRED = /([a-z][a-z0-9+.-]*:\/\/[^\s:@/"'`\\]+):([^\s:@/"'`\\]+)@/gi;
 // 目的：真相库的 .jsonl 原文本身就不含密钥——不再只靠派生 .md / 读出口（redactReadable）兜底；完整原文留产出者本机。
 export const redactJsonl = (s) =>
   PREFIX_RULES.reduce((a, [re, to]) => a.replace(re, to), String(s || ""))
-    .replace(ASSIGN_JSONL, (m, head, val) => (/^[\d.]+$/.test(val) ? m : head + "[REDACTED_SECRET]"))
+    .replace(ASSIGN_JSONL, (m, head, val) => (/^[\d.]+$/.test(val) || PLACEHOLDER.test(val) ? m : head + "[REDACTED_SECRET]"))
     .replace(URL_CRED, (_m, head) => head + ":[REDACTED_SECRET]@");
 
 // 把本机家目录路径抹成 ~（agent 配置里满是机器级绝对路径，跨人/入库前必须中和）。

@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { makeMcpHttpHandler } from "../server/mcphttp.mjs";
+import { makeMcpHttpHandler, normalizeMcpRequest } from "../server/mcphttp.mjs";
 
 // 临时 git 真相库：铺两条带 frontmatter 的 session 卡片（grep/read 要能命中正文）。
 function gitTruth() {
@@ -38,12 +38,11 @@ async function startServer(TRUTH) {
     resolvePath: (p) => p || "", resolveSpace: (k) => k,
   });
   const server = http.createServer(async (req, res) => {
-    let body;
-    if (req.method === "POST") {
-      const chunks = [];
-      for await (const c of req) chunks.push(c);
-      try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { body = undefined; }
-    }
+    // 复刻 server.mjs /mcp 路由：非 POST → 405；POST 经 normalizeMcpRequest 钉规范头再交给 handler。
+    if (!normalizeMcpRequest(req)) { res.setHeader("allow", "POST"); res.writeHead(405, { "content-type": "application/json" }); return res.end(JSON.stringify({ error: "method not allowed; POST only" })); }
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    let body; try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { body = undefined; }
     handler(req, res, body);
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -87,3 +86,32 @@ test("HTTP MCP: sessions 按人查命中工作时间", () => withClient(async (c
   assert.match(text, /user2/);
   assert.match(text, /2026-06-20/);
 }));
+
+// 裸 HTTP 客户端（curl / 手写 bot）：默认 Accept */*、漏 Content-Type 也要能用，不被 SDK 的严格头校验挡成 406/415。
+const INIT = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "curl", version: "0" } } };
+async function raw(method, headers, body) {
+  const { server, url } = await startServer(gitTruth());
+  try {
+    const r = await fetch(url, { method, headers, body: body && JSON.stringify(body) });
+    return { status: r.status, text: await r.text() };
+  } finally { server.close(); }
+}
+
+test("HTTP MCP: 裸 POST（Accept */*、Content-Type 缺/text-plain）也能 initialize → 200", async () => {
+  for (const headers of [
+    { accept: "*/*", "content-type": "application/json" },   // curl 默认 Accept
+    { accept: "application/json" },                            // 只列 json（缺 sse）
+    {},                                                        // 啥都不带（fetch 会塞 text/plain）
+  ]) {
+    const r = await raw("POST", headers, INIT);
+    assert.equal(r.status, 200, `headers=${JSON.stringify(headers)} -> ${r.text.slice(0, 80)}`);
+    assert.match(r.text, /protocolVersion/);
+  }
+});
+
+test("HTTP MCP: 非 POST（GET/DELETE）→ 405，不挂连接", async () => {
+  for (const method of ["GET", "DELETE"]) {
+    const r = await raw(method, { accept: "application/json, text/event-stream" });
+    assert.equal(r.status, 405, `${method} 应 405`);
+  }
+});

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { slimRaw } from "../core/slim.mjs";
-import { redactJsonl } from "../core/redact.mjs";
+import { redactJsonl, redact } from "../core/redact.mjs";
 import { parseSessionText } from "../core/parse.mjs";
 
 const big = (n) => "x ".repeat(n);   // 含空格 → 不是 base64 大块，走字段截断
@@ -152,4 +152,27 @@ test("redactJsonl: 字符串型密钥仍照常脱敏，且不破坏 JSON", () =>
   const out = redactJsonl(line);
   assert.match(out, /REDACTED_SECRET/, "字母数字混合的密钥值仍要抹");
   assert.doesNotThrow(() => JSON.parse(out));
+});
+
+test("slim: session_history *.md 文档整篇保留，不被当 tool 输出截成 3KB", () => {
+  const body = "# Agent Task\n\n" + "正常方案文档内容。".repeat(400);   // 远超 TOOL_HEAD+TAIL(3KB)
+  const raw = [
+    JSON.stringify({ type: "session_history_meta", timestamp: "2026-06-01T00:00:00Z", source_file: "docs/current/agent-task-x.md" }),
+    JSON.stringify({ type: "session_history_markdown", timestamp: "2026-06-01T00:00:00Z", content: body }),
+  ].join("\n") + "\n";
+  const out = slimRaw(raw);
+  assert.doesNotMatch(out, /\[略/, "文档正文不该被截断");
+  const md = out.split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .find((o) => o && o.type === "session_history_markdown");
+  assert.equal(md.content, body, "正文逐字保留");
+});
+
+test("redact: 占位/示例值放行，真密钥仍抹（GENERIC_RULE 文档正文路径）", () => {
+  // 占位符/标识符 → 不脱敏（文档里 design token / YOUR_KEY 这类不该被误伤）
+  for (const s of ["token: example-token-here", "api_key: YOUR_API_KEY_HERE", "token: <your-token>", "password: changeme-now"]) {
+    assert.doesNotMatch(redact(s), /REDACTED/, `占位值应放行: ${s}`);
+  }
+  // 真值 → 照常抹
+  assert.match(redact("password: hunter2longsecret"), /REDACTED_SECRET/, "真密钥仍要抹");
+  assert.match(redact("api_key: abcdEFGH1234secretval"), /REDACTED_SECRET/, "随机真值仍要抹");  // 复用 .gitleaks.toml 已放行的测试假密钥
 });
